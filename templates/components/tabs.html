@@ -1,0 +1,127 @@
+<ul class="nav nav-tabs mb-3" id="myTab" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button
+      class="nav-link active"
+      id="livestreams-tab"
+      data-bs-toggle="tab"
+      data-bs-target="#livestreams"
+      type="button"
+      role="tab"
+      aria-controls="livestreams"
+      aria-selected="true"
+    >
+      Live Streams
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button
+      class="nav-link"
+      id="gps-tab"
+      data-bs-toggle="tab"
+      data-bs-target="#gps"
+      type="button"
+      role="tab"
+      aria-controls="gps"
+      aria-selected="false"
+    >
+      GPS Controls <span class="badge bg-secondary">Coming Soon</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button
+      class="nav-link"
+      id="radio-tab"
+      data-bs-toggle="tab"
+      data-bs-target="#radio"
+      type="button"
+      role="tab"
+      aria-controls="radio"
+      aria-selected="false"
+    >
+      Radio Controls <span class="badge bg-secondary">Coming Soon</span>
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content" id="myTabContent">
+  <!-- Live Streams Tab (Active) -->
+  <div
+    class="tab-pane fade show active"
+    id="livestreams"
+    role="tabpanel"
+    aria-labelledby="livestreams-tab"
+  >
+    <!-- Stream Cards -->
+    <div class="row" id="streams-container">
+      {% for stream in streams %}
+        {% include "components/stream_card.html" %}
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- GPS Controls Tab -->
+  <div
+    class="tab-pane fade"
+    id="gps"
+    role="tabpanel"
+    aria-labelledby="gps-tab"
+  >
+    <div class="card mb-4">
+      <div class="card-body">
+        <h4 class="card-title">
+          <i class="bi bi-geo-alt me-2"></i> GPS Controls
+        </h4>
+        <div class="alert alert-info">
+          <h5><i class="bi bi-info-circle me-2"></i> Coming Soon</h5>
+          <p>
+            GPS tracking features for live streams are currently in
+            development. This will enable real-time location tracking of
+            your streams on interactive maps.
+          </p>
+          <hr />
+          <p class="mb-0">Expected features include:</p>
+          <ul>
+            <li>Real-time GPS tracking for stream sources</li>
+            <li>Interactive map views with multiple stream locations</li>
+            <li>Location history and route tracking</li>
+            <li>Geofencing and location-based alerts</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Radio Controls Tab -->
+  <div
+    class="tab-pane fade"
+    id="radio"
+    role="tabpanel"
+    aria-labelledby="radio-tab"
+  >
+    <div class="card mb-4">
+      <div class="card-body">
+        <h4 class="card-title">
+          <i class="bi bi-broadcast me-2"></i> Radio Controls
+        </h4>
+        <div class="alert alert-info">
+          <h5><i class="bi bi-info-circle me-2"></i> Coming Soon</h5>
+          <p>
+            Radio communications integration is under development. This
+            feature will allow direct communication with field teams
+            during live streaming.
+          </p>
+          <hr />
+          <p class="mb-0">Expected features include:</p>
+          <ul>
+            <li>Two-way radio communication with stream operators</li>
+            <li>Audio broadcast controls for emergency messaging</li>
+            <li>Private communication channels for team coordination</li>
+            <li>
+              Voice message recording and playback for stream operators
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

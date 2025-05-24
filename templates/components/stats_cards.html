@@ -1,0 +1,49 @@
+<div class="row mb-4">
+  <div class="col-md-3">
+    <div class="card text-white bg-primary">
+      <div class="card-body">
+        <h5 class="card-title">Total Streams</h5>
+        <p class="card-text display-6" id="total-streams">
+          {{ total_streams }}
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="card text-white bg-success">
+      <div class="card-body">
+        <h5 class="card-title">Online Streams</h5>
+        <p class="card-text display-6" id="online-streams">
+          {{ online_streams }}
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-white bg-info">
+      <div class="card-body">
+        <h5 class="card-title">Total Viewers</h5>
+        <p class="card-text display-6" id="total-viewers">
+          {{ total_viewers }}
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <h5 class="card-title mb-0">Last Updated</h5>
+          <button
+            class="btn btn-sm btn-outline-secondary"
+            id="manual-refresh-btn"
+          >
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+        <p class="card-text mt-2" id="update-time">{{ update_time }}</p>
+      </div>
+    </div>
+  </div>
+</div>

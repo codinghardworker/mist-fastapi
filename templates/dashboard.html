@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live Fusion Dashboard</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css"
+      rel="stylesheet"
+    />
+    <script src="https://tir3.com/player.js"></script>
+    <style>
+      :root {
+        --primary-color: #6366f1;
+        --secondary-color: #4f46e5;
+        --success-color: #22c55e;
+        --danger-color: #ef4444;
+        --warning-color: #f59e0b;
+        --info-color: #0ea5e9;
+        --dark-color: #1e293b;
+        --light-color: #f8fafc;
+        --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+          0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --transition-speed: 0.3s;
+      }
+
+      body {
+        background-color: #f1f5f9;
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, sans-serif;
+      }
+
+      .navbar {
+        background-color: var(--dark-color) !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .navbar-brand {
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+
+      .dropdown-menu {
+        right: 0;
+        left: auto;
+        border: none;
+        box-shadow: var(--card-shadow);
+        border-radius: 0.5rem;
+      }
+
+      .card {
+        border: none;
+        border-radius: 0.75rem;
+        box-shadow: var(--card-shadow);
+        transition: all var(--transition-speed);
+        overflow: hidden;
+      }
+
+      .stats-card {
+        height: 100%;
+      }
+
+      .stats-card .card-body {
+        padding: 1.5rem;
+      }
+
+      .stats-card .card-title {
+        font-size: 0.875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        opacity: 0.8;
+        margin-bottom: 0.75rem;
+      }
+
+      .stats-card .display-6 {
+        font-weight: 700;
+        margin-bottom: 0;
+      }
+
+      .stream-card {
+        margin-bottom: 20px;
+        transition: all var(--transition-speed);
+      }
+
+      .stream-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+          0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      }
+
+      .stream-card .card-header {
+        background-color: white;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        padding: 1rem 1.25rem;
+      }
+
+      .stream-card .card-header h5 {
+        font-weight: 600;
+        font-size: 1.1rem;
+        margin: 0;
+      }
+
+      .video-container {
+        position: relative;
+        padding-bottom: 56.25%;
+        height: 0;
+        overflow: hidden;
+        background: #000;
+      }
+
+      .mistvideo {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .offline-placeholder {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        background: #1e293b;
+      }
+
+      .offline-placeholder h4 {
+        font-weight: 600;
+        opacity: 0.7;
+      }
+
+      .stream-status {
+        transition: all var(--transition-speed);
+        font-weight: 500;
+      }
+
+      .push-status-container {
+        max-height: 150px;
+        overflow-y: auto;
+        padding-right: 5px;
+        scrollbar-width: thin;
+      }
+
+      .push-config {
+        border-radius: 0.5rem;
+        font-size: 0.85rem;
+        padding: 0.75rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .push-active {
+        background-color: rgba(34, 197, 94, 0.1);
+        border-left: 3px solid var(--success-color);
+      }
+
+      .push-inactive {
+        background-color: rgba(239, 68, 68, 0.1);
+        border-left: 3px solid var(--danger-color);
+      }
+
+      .push-target {
+        word-break: break-all;
+        font-family: "Roboto Mono", monospace;
+        font-size: 0.75rem;
+      }
+
+      .push-notes {
+        color: inherit;
+        opacity: 0.8;
+        word-break: break-word;
+        font-size: 0.8rem;
+      }
+
+      .push-controls .spinner-border {
+        vertical-align: text-top;
+        margin-right: 5px;
+      }
+
+      .push-controls .btn:disabled {
+        opacity: 0.7;
+      }
+
+      .push-controls .input-group {
+        margin-bottom: 8px;
+      }
+
+      .push-controls .input-group input {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.375rem 0 0 0.375rem;
+      }
+
+      .push-controls .input-group .btn {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0 0.375rem 0.375rem 0;
+      }
+
+      .user-info {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+      }
+
+      .user-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background-color: var(--primary-color);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 1.25rem;
+      }
+
+      .btn-primary {
+        background-color: var(--primary-color);
+        border-color: var(--primary-color);
+      }
+
+      .btn-primary:hover {
+        background-color: var(--secondary-color);
+        border-color: var(--secondary-color);
+      }
+
+      .btn-outline-primary {
+        color: var(--primary-color);
+        border-color: var(--primary-color);
+      }
+
+      .btn-outline-primary:hover {
+        background-color: var(--primary-color);
+        border-color: var(--primary-color);
+      }
+
+      .bg-primary {
+        background-color: var(--primary-color) !important;
+      }
+
+      .btn-success {
+        background-color: var(--success-color);
+        border-color: var(--success-color);
+      }
+
+      .bg-success {
+        background-color: var(--success-color) !important;
+      }
+
+      .btn-danger {
+        background-color: var(--danger-color);
+        border-color: var(--danger-color);
+      }
+
+      .bg-danger {
+        background-color: var(--danger-color) !important;
+      }
+
+      .btn-info {
+        background-color: var(--info-color);
+        border-color: var(--info-color);
+        color: white;
+      }
+
+      .bg-info {
+        background-color: var(--info-color) !important;
+      }
+
+      .btn-warning {
+        background-color: var(--warning-color);
+        border-color: var(--warning-color);
+        color: white;
+      }
+
+      .badge {
+        font-weight: 500;
+        padding: 0.35em 0.65em;
+        border-radius: 0.375rem;
+      }
+
+      /* QR Code Modal Styles */
+      #qrCodeContainer img {
+        width: 100%;
+        height: auto;
+        max-width: 200px;
+        margin: 0 auto;
+        display: block;
+      }
+
+      #whatsappShareBtn {
+        background-color: #25d366;
+        border-color: #25d366;
+      }
+
+      #telegramShareBtn {
+        background-color: #0088cc;
+        border-color: #0088cc;
+      }
+
+      /* New tab styles */
+      .nav-tabs {
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        margin-bottom: 1.5rem;
+      }
+
+      .nav-tabs .nav-link {
+        border: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        font-weight: 500;
+        color: #64748b;
+        padding: 0.75rem 1rem;
+      }
+
+      .nav-tabs .nav-link:hover {
+        border-color: transparent;
+        color: var(--primary-color);
+      }
+
+      .nav-tabs .nav-link.active {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+        background-color: transparent;
+      }
+
+      .tab-content {
+        padding-top: 1rem;
+      }
+
+      .tab-pane {
+        animation: fadeIn 0.3s;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      /* Future video controls section */
+      .future-controls {
+        background-color: rgba(99, 102, 241, 0.05);
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .future-controls-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+
+      .future-controls-header h4 {
+        margin: 0;
+        font-weight: 600;
+        font-size: 1.1rem;
+        color: var(--dark-color);
+      }
+
+      .future-controls-header .badge {
+        background-color: rgba(99, 102, 241, 0.2);
+        color: var(--primary-color);
+      }
+
+      .future-controls-body {
+        opacity: 0.7;
+      }
+
+      /* Last updated refresh button */
+      #manual-refresh-btn {
+        border-radius: 0.375rem;
+        padding: 0.25rem 0.5rem;
+      }
+
+      .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+      }
+
+      .page-header h1 {
+        font-weight: 700;
+        font-size: 1.75rem;
+        margin: 0;
+        color: var(--dark-color);
+      }
+
+      .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(255, 255, 255, 0.8);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s;
+      }
+
+      .loading-spinner {
+        width: 3rem;
+        height: 3rem;
+        border-width: 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    {% include "components/loading_overlay.html" %} {% include
+    "components/navbar.html" %}
+
+    <div class="container-fluid mt-3">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="mb-0">Live Fusion Dashboard</h1>
+        <div class="user-info">
+          <span class="text-muted"
+            >Welcome, <strong>{{ current_user.username }}</strong></span
+          >
+          <div class="user-avatar">{{ current_user.username[0].upper() }}</div>
+        </div>
+      </div>
+
+      {% include "components/stats_cards.html" %} {% include
+      "components/tabs.html" %}
+    </div>
+
+    {% include "components/qr_modal.html" %} {% include
+    "components/push_limit_modal.html" %}
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+                  const qrCodeModal = new bootstrap.Modal(document.getElementById('qrCodeModal'));
+
+                  document.addEventListener('click', function(e) {
+                      // Handle share button click
+                      if (e.target.classList.contains('share-stream-btn') ||
+                         e.target.closest('.share-stream-btn')) {
+                          const button = e.target.classList.contains('share-stream-btn') ?
+                                        e.target : e.target.closest('.share-stream-btn');
+                          const streamName = button.dataset.streamName;
+                          const streamUrl = button.dataset.streamUrl;
+
+                          // Generate QR code
+                          const qr = qrcode(0, 'L');
+                          qr.addData(streamUrl);
+                          qr.make();
+                          document.getElementById('qrCodeContainer').innerHTML = qr.createImgTag(4);
+                          document.getElementById('streamUrlInput').value = streamUrl;
+
+
+                          qrCodeModal.show();
+                      }
+
+                      // Handle copy URL button
+                      if (e.target.classList.contains('copy-url-btn') ||
+                         e.target.closest('.copy-url-btn')) {
+                          const button = e.target.classList.contains('copy-url-btn') ?
+                                        e.target : e.target.closest('.copy-url-btn');
+                          const input = document.getElementById('streamUrlInput');
+                          input.select();
+                          document.execCommand('copy');
+
+                          // Show feedback
+                          const originalText = button.innerHTML;
+                          button.innerHTML = '<i class="bi bi-check"></i> Copied!';
+                          setTimeout(() => {
+                              button.innerHTML = originalText;
+                          }, 2000);
+                      }
+                  });
+
+                                  // Initialize players for online streams
+                                  document.addEventListener('DOMContentLoaded', function() {
+                                      {% for stream in streams %}
+                                          {% if stream.online %}
+                                          (function() {
+                                              var streamName = "{{ stream.name }}";
+                                              var embedId = "{{ stream.embed_id }}";
+                                              var playerId = streamName + "_" + embedId;
+
+                                              if (!window.mistPlayers) window.mistPlayers = {};
+                                              if (!window.mistPlayers[playerId]) {
+        let retryCount = 0;
+const maxRetries = 3;
+                                                function initPlayerWithRetry() {
+          mistPlay(streamName, {
+              target: document.getElementById(playerId),
+              autoplay: true,
+              muted: true,
+              onError: (error) => {
+                  console.error("Player error:", error);
+                  if (retryCount < maxRetries) {
+                      retryCount++;
+                      setTimeout(initPlayerWithRetry, 2000 * retryCount); // 2s, 4s, 6s delays
+                  }
+              }
+          });
+      }
+
+                                                 // Wrap your player init in try-catch
+            try {
+                if (window.mistplayers) {
+                    initPlayerWithRetry();
+                } else {
+                    const script = document.createElement("script");
+                    script.src = "https://tir3.com/player.js";
+                    script.onerror = () => {
+                        console.error("Player script failed to load!");
+                        // Fallback: Show an error message to users
+                        document.getElementById(playerId).innerHTML = `
+                            <div class="alert alert-danger">
+                                Stream player failed to load. Refresh or try later.
+                            </div>
+                        `;
+                    };
+                    script.onload = initPlayerWithRetry;
+                    document.head.appendChild(script);
+                }
+            } catch (error) {
+                console.error("Player initialization crashed:", error);
+            }
+                                              }
+                                          })();
+                                          {% endif %}
+                                      {% endfor %}
+
+                                      // Load current push limit
+                                      loadPushLimit();
+                                  });
+
+                                  // Authentication functions
+                                  function getAuthToken() {
+                                      return localStorage.getItem('token');
+                                  }
+
+                                  async function logout() {
+                                      try {
+                                          const token = getAuthToken();
+                                          if (token) {
+                                              await fetch('/auth/logout', {
+                                                  method: 'POST',
+                                                  headers: {
+                                                      'Authorization': `Bearer ${token}`,
+                                                      'Content-Type': 'application/json'
+                                                  }
+                                              });
+                                          }
+                                          localStorage.removeItem('token');
+                                          window.location.href = '/login';
+                                      } catch (error) {
+                                          console.error('Logout error:', error);
+                                          window.location.href = '/login';
+                                      }
+                                  }
+
+                                  // API functions
+                                  async function fetchWithAuth(url, options = {}) {
+                                      const token = getAuthToken();
+                                      if (!token) {
+                                          window.location.href = '/login';
+                                          return null;
+                                      }
+
+                                      const response = await fetch(url, {
+                                          ...options,
+                                          headers: {
+                                              ...options.headers,
+                                              'Authorization': `Bearer ${token}`,
+                                              'Content-Type': 'application/json'
+                                          }
+                                      });
+
+                                      if (response.status === 401) {
+                                          localStorage.removeItem('token');
+                                          window.location.href = '/login';
+                                          return null;
+                                      }
+
+                                      return response;
+                                  }
+
+                                  // Push limit functions
+                                  async function loadPushLimit() {
+                                      try {
+                                          const response = await fetchWithAuth('/api/user/push_limit');
+                                          if (response) {
+                                              const data = await response.json();
+                                              document.getElementById('currentPushLimit').value = data.max_pushes;
+                                          }
+                                      } catch (error) {
+                                          console.error('Error loading push limit:', error);
+                                      }
+                                  }
+
+                                  // Add this to your existing JavaScript code
+
+                          // Manual refresh function
+                          function manualRefresh() {
+                              const refreshBtn = document.getElementById('manual-refresh-btn');
+                              refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+                              refreshBtn.disabled = true;
+
+                              updateStreamData().finally(() => {
+                                  refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+                                  refreshBtn.disabled = false;
+                              });
+                          }
+
+                          // Add event listener for the manual refresh button
+                          document.getElementById('manual-refresh-btn').addEventListener('click', manualRefresh);
+
+
+                                  // Stream data updates
+                                  async function updateStreamData() {
+                                      try {
+                                          const response = await fetchWithAuth("/api/stream_views");
+                                          if (!response) return;
+
+                                          const data = await response.json();
+                                          let totalViewers = 0;
+                                          let onlineStreams = 0;
+
+                                          // Update each stream card
+                                          for (const [streamName, streamData] of Object.entries(data)) {
+                                              const card = document.querySelector(`.stream-card-container[data-stream-name="${streamName}"]`);
+                                              if (!card) continue;
+
+                                              // Update viewer count
+                                              const viewersElement = card.querySelector('.stream-viewers');
+                                              if (viewersElement) {
+                                                  viewersElement.textContent = streamData.current_viewers;
+                                              }
+
+                                              // Update status badge
+                                              const statusBadge = card.querySelector('.stream-status');
+                                              if (statusBadge) {
+                                                  statusBadge.className = `badge bg-${streamData.is_online ? 'success' : 'danger'} stream-status`;
+                                                  statusBadge.textContent = streamData.is_online ? 'Online' : 'Offline';
+                                              }
+
+                                              // Update totals
+                                              if (streamData.is_online) {
+                                                  totalViewers += streamData.current_viewers;
+                                                  onlineStreams++;
+                                              }
+                                          }
+
+                                          // Update dashboard stats
+                                          document.getElementById('total-viewers').textContent = totalViewers;
+                                          document.getElementById('online-streams').textContent = onlineStreams;
+                                          document.getElementById('update-time').textContent = new Date().toLocaleTimeString();
+
+                                      } catch (error) {
+                                          console.error('Error updating stream data:', error);
+                                      }
+                                  }
+
+                                  // Event listeners
+                                  document.addEventListener('click', async function(e) {
+
+                                      // Reset stream button
+                        if (e.target.classList.contains('reset-stream-btn')) {
+                            const button = e.target;
+                            const streamName = button.dataset.streamName;
+
+                            if (confirm(`Are you sure you want to reset the stream "${streamName}"? This will temporarily interrupt the stream.`)) {
+                                button.disabled = true;
+                                button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+                                try {
+                                    const response = await fetchWithAuth('/api/reset_stream', {
+                                        method: 'POST',
+                                        body: JSON.stringify({ stream_name: streamName })
+                                    });
+
+                                    if (response) {
+                                        const result = await response.json();
+                                        if (result.success) {
+                                            button.innerHTML = '<i class="bi bi-check"></i>';
+                                            setTimeout(() => {
+                                                button.innerHTML = 'Reset Stream';
+                                                button.disabled = false;
+                                            }, 2000);
+                                        } else {
+                                            alert('Error: ' + (result.error || 'Reset failed'));
+                                            button.innerHTML = 'Reset Stream';
+                                            button.disabled = false;
+                                        }
+                                    }
+                                } catch (error) {
+                                    console.error('Error resetting stream:', error);
+                                    button.innerHTML = 'Reset Stream';
+                                    button.disabled = false;
+                                }
+                            }
+                        }
+
+                                      // Update push URL
+                                      if (e.target.classList.contains('update-url-btn')) {
+                                          const button = e.target;
+                                          const input = button.closest('.input-group').querySelector('.push-url-input');
+                                          const pushId = button.dataset.pushId;
+                                          const newUrl = input.value.trim();
+
+                                          if (!newUrl) {
+                                              alert('Please enter a valid URL');
+                                              return;
+                                          }
+
+                                          button.disabled = true;
+                                          button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+                                          try {
+                                              const response = await fetchWithAuth('/api/update_push_url', {
+                                                  method: 'POST',
+                                                  body: JSON.stringify({ push_id: pushId, new_url: newUrl })
+                                              });
+
+                                              if (response) {
+                                                  const result = await response.json();
+                                                  if (result.success) {
+                                                      button.innerHTML = '<i class="bi bi-check"></i>';
+                                                      setTimeout(() => {
+                                                          button.innerHTML = 'Update';
+                                                          button.disabled = false;
+                                                      }, 1000);
+                                                  } else {
+                                                      alert('Error: ' + (result.error || 'Update failed'));
+                                                      button.innerHTML = 'Update';
+                                                      button.disabled = false;
+                                                  }
+                                              }
+                                          } catch (error) {
+                                              console.error('Error updating URL:', error);
+                                              button.innerHTML = 'Update';
+                                              button.disabled = false;
+                                          }
+                                      }
+
+                                      // Toggle push status
+                                      if (e.target.classList.contains('toggle-push')) {
+                                          const button = e.target;
+                                          const pushId = button.dataset.pushId;
+                                          const currentState = button.dataset.currentState;
+                                          const newState = currentState === 'active' ? 'inactive' : 'active';
+
+                                          button.disabled = true;
+                                          button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+                                          try {
+                                              const response = await fetchWithAuth('/api/toggle_push', {
+                                                  method: 'POST',
+                                                  body: JSON.stringify({ push_id: pushId, new_state: newState })
+                                              });
+
+                                              if (response) {
+                                                  const result = await response.json();
+                                                  if (result.success) {
+                                                      const pushConfig = button.closest('.push-config');
+
+                                                      // Update UI
+                                                      if (newState === 'inactive') {
+                                                          pushConfig.classList.remove('push-active');
+                                                          pushConfig.classList.add('push-inactive');
+                                                          button.classList.remove('btn-warning');
+                                                          button.classList.add('btn-success');
+                                                          button.textContent = 'Activate';
+                                                          pushConfig.querySelector('.badge').className = 'badge bg-danger';
+                                                          pushConfig.querySelector('.badge').textContent = 'INACTIVE';
+                                                      } else {
+                                                          pushConfig.classList.remove('push-inactive');
+                                                          pushConfig.classList.add('push-active');
+                                                          button.classList.remove('btn-success');
+                                                          button.classList.add('btn-warning');
+                                                          button.textContent = 'Deactivate';
+                                                          pushConfig.querySelector('.badge').className = 'badge bg-success';
+                                                          pushConfig.querySelector('.badge').textContent = 'ACTIVE';
+                                                      }
+
+                                                      button.dataset.currentState = newState;
+                                                  } else {
+                                                      alert('Error: ' + (result.error || 'Operation failed'));
+                                                  }
+                                              }
+                                          } catch (error) {
+                                              console.error('Error toggling push:', error);
+                                          } finally {
+                                              button.disabled = false;
+                                              button.innerHTML = newState === 'active' ? 'Deactivate' : 'Activate';
+                                          }
+                                      }
+
+                                      // Set push limit (admin only)
+                                      if (e.target.id === 'setPushLimitBtn') {
+                                          const email = document.getElementById('userEmail').value.trim();
+                                          const limit = parseInt(document.getElementById('newPushLimit').value);
+
+                                          if (!email || isNaN(limit) || limit < 0) {
+                                              alert('Please enter valid email and limit');
+                                              return;
+                                          }
+
+                                          try {
+                                              const response = await fetchWithAuth('/api/admin/set_push_limit', {
+                                                  method: 'POST',
+                                                  body: JSON.stringify({ user_email: email, max_pushes: limit })
+                                              });
+
+                                              if (response) {
+                                                  const result = await response.json();
+                                                  if (result.success) {
+                                                      alert(`Push limit set to ${limit} for ${email}`);
+                                                  } else {
+                                                      alert('Error: ' + (result.error || 'Failed to set limit'));
+                                                  }
+                                              }
+                                          } catch (error) {
+                                              console.error('Error setting push limit:', error);
+                                          }
+                                      }
+                                  });
+
+                                  // Start periodic updates (every second)
+                                  setInterval(updateStreamData, 1000);
+    </script>
+  </body>
+</html>

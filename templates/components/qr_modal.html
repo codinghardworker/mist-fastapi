@@ -1,0 +1,34 @@
+<div class="modal fade" id="qrCodeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-qr-code me-2"></i>Share Stream
+        </h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body text-center">
+        <div id="qrCodeContainer" class="mb-3"></div>
+        <div class="input-group mb-3">
+          <input
+            type="text"
+            class="form-control"
+            id="streamUrlInput"
+            readonly
+          />
+          <button
+            class="btn btn-outline-secondary copy-url-btn"
+            type="button"
+          >
+            <i class="bi bi-clipboard"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ stream_name }} - Stream Details</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .card-header { font-weight: 500; }
+        .metadata-container { max-height: 400px; overflow-y: auto; }
+        .process-card { margin-bottom: 1rem; border-left: 4px solid #0d6efd; }
+        .process-card .card-header { background-color: rgba(13, 110, 253, 0.05); }
+        .stream-url { font-family: monospace; font-size: 0.9rem; }
+        .url-badge { cursor: pointer; }
+        .url-badge:hover { opacity: 0.8; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <a href="/dashboard" class="text-decoration-none me-3"><i class="bi bi-arrow-left"></i></a>
+                Stream: {{ stream_name }}
+            </h1>
+            <div>
+                <span class="badge rounded-pill {% if stream.is_online %}bg-success{% else %}bg-secondary{% endif %} me-2">
+                    {% if stream.is_online %}
+                        <i class="bi bi-check-circle-fill"></i> Online
+                    {% else %}
+                        <i class="bi bi-x-circle-fill"></i> Offline
+                    {% endif %}
+                </span>
+                <span class="badge rounded-pill bg-primary">
+                    <i class="bi bi-people-fill"></i> {{ stream.current_viewers }} viewers
+                </span>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Left Column -->
+            <div class="col-md-8">
+                <!-- Stats Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-graph-up"></i> Viewer Statistics (48 hours)
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h5 class="card-title">Current Viewers</h5>
+                                        <p class="card-text display-6">{{ stream.current_viewers }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h5 class="card-title">Max Viewers</h5>
+                                        <p class="card-text display-6">{{ stream.max_viewers }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h5 class="card-title">Uptime</h5>
+                                        <p class="card-text display-6">{{ stream.uptime }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <canvas id="viewerChart" height="150"></canvas>
+                    </div>
+                </div>
+
+                {% if current_user.role == "admin" %}
+                <!-- Processes Card (Admin Only) -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-gear"></i> Processes ({{ stream.processes|length }})
+                    </div>
+                    <div class="card-body">
+                        {% for process in stream.processes %}
+                        <div class="card process-card mb-3">
+                            <div class="card-header">
+                                Process #{{ loop.index }} - {{ process.process }}
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <ul class="list-group list-group-flush">
+                                            <li class="list-group-item">
+                                                <strong>Type:</strong> {{ process.process }}
+                                            </li>
+                                            <li class="list-group-item">
+                                                <strong>Sink:</strong> {{ process.sink }}
+                                            </li>
+                                            <li class="list-group-item">
+                                                <strong>Restart Type:</strong> {{ process.restart_type }}
+                                            </li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <ul class="list-group list-group-flush">
+                                            <li class="list-group-item">
+                                                <strong>Debug Level:</strong> {{ process.debug }}
+                                            </li>
+                                            <li class="list-group-item">
+                                                <strong>Track Select:</strong> {{ process.track_select }}
+                                            </li>
+                                            <li class="list-group-item">
+                                                <strong>Inconsequential:</strong> {{ process.inconsequential }}
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Right Column -->
+            <div class="col-md-4">
+                <!-- Stream URLs Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-link-45deg"></i> Stream URLs
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">Access this stream directly:</h5>
+                        
+                        <div class="mb-3">
+                            <h6>RTMP URL:</h6>
+                            <div class="input-group mb-2">
+                                <input type="text" class="form-control stream-url" value="rtmp://tir3.com/live/{{ original_name }}" readonly>
+                                <button class="btn btn-outline-secondary copy-btn" type="button">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h6>SRT URL:</h6>
+                            <div class="input-group mb-2">
+                                <input type="text" class="form-control stream-url" value="srt://tir3.com:8889?streamid={{ original_name }}" readonly>
+                                <button class="btn btn-outline-secondary copy-btn" type="button">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        {% if current_user.role == "admin" %}
+                        <div class="mb-3">
+                            <h6>HLS URL:</h6>
+                            <div class="input-group mb-2">
+                                <input type="text" class="form-control stream-url" value="http://tir3.com/hls/{{ original_name }}/index.m3u8" readonly>
+                                <button class="btn btn-outline-secondary copy-btn" type="button">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h6>WebRTC URL:</h6>
+                            <div class="input-group">
+                                <input type="text" class="form-control stream-url" value="http://tir3.com/webrtc/{{ original_name }}" readonly>
+                                <button class="btn btn-outline-secondary copy-btn" type="button">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Embed Code Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-code"></i> Embed Code
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title">Embed this stream</h5>
+                        <div class="mb-3">
+                            <label class="form-label">HTML Embed Code</label>
+                            <textarea class="form-control" rows="5" readonly>{{ embed_code }}</textarea>
+                        </div>
+                        <button class="btn btn-primary copy-btn" data-target="textarea.form-control">
+                            <i class="bi bi-clipboard"></i> Copy Embed Code
+                        </button>
+                    </div>
+                </div>
+
+                {% if current_user.role == "admin" %}
+                <!-- Push Configurations Card (Admin Only) -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-send"></i> Push Configurations ({{ push_configs|length }})
+                    </div>
+                    <div class="card-body">
+                        {% if push_configs %}
+                            {% for push in push_configs %}
+                            <div class="card mb-3">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span>Push #{{ loop.index }}</span>
+                                    <span class="badge {% if push.deactivated %}bg-secondary{% else %}bg-success{% endif %}">
+                                        {% if push.deactivated %}Inactive{% else %}Active{% endif %}
+                                    </span>
+                                </div>
+                                <div class="card-body">
+                                    <p><strong>Target:</strong> {{ push.target }}</p>
+                                    <p><strong>Status:</strong> 
+                                        <span class="badge {% if push.deactivated %}bg-secondary{% else %}bg-success{% endif %}">
+                                            {% if push.deactivated %}Inactive{% else %}Active{% endif %}
+                                        </span>
+                                    </p>
+                                    {% if push.notes %}<p><strong>Notes:</strong> {{ push.notes }}</p>{% endif %}
+                                    <div class="d-flex justify-content-between">
+                                        <button class="btn btn-sm btn-outline-primary toggle-push-btn" 
+                                                data-push-id="{{ push.push_id }}"
+                                                data-current-state="{% if push.deactivated %}inactive{% else %}active{% endif %}">
+                                            {% if push.deactivated %}
+                                                <i class="bi bi-power"></i> Activate
+                                            {% else %}
+                                                <i class="bi bi-power"></i> Deactivate
+                                            {% endif %}
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary edit-push-btn" 
+                                                data-push-id="{{ push.push_id }}"
+                                                data-current-url="{{ push.target }}">
+                                            <i class="bi bi-pencil"></i> Edit URL
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-muted">No push configurations for this stream.</p>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if current_user.role == "admin" %}
+        <!-- Metadata Card (Admin Only) -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-code-slash"></i> Raw Metadata
+            </div>
+            <div class="card-body metadata-container">
+                <pre>{{ metadata }}</pre>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Edit URL Modal -->
+    <div class="modal fade" id="editPushModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Push URL</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="pushUrlInput" class="form-label">New Push URL</label>
+                        <input type="text" class="form-control" id="pushUrlInput" placeholder="rtmp://example.com/app/streamkey">
+                        <div class="form-text">Must start with rtmp://, rtmps://, or srt://</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="savePushUrlBtn">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Initialize viewer chart
+        const ctx = document.getElementById('viewerChart').getContext('2d');
+        const historyData = JSON.parse('{{ history_data|safe }}');
+        
+        const timestamps = historyData.map(point => new Date(point.timestamp).toLocaleTimeString());
+        const viewers = historyData.map(point => point.viewers);
+        
+        const viewerChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [{
+                    label: 'Viewers',
+                    data: viewers,
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Viewers'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Copy buttons functionality
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                let targetElement;
+                
+                if (this.dataset.target) {
+                    targetElement = document.querySelector(this.dataset.target);
+                } else {
+                    targetElement = this.parentElement.querySelector('.stream-url') || 
+                                  this.parentElement.querySelector('textarea');
+                }
+                
+                if (targetElement) {
+                    targetElement.select();
+                    document.execCommand('copy');
+                    
+                    // Show feedback
+                    const originalText = this.innerHTML;
+                    this.innerHTML = '<i class="bi bi-check"></i> Copied!';
+                    setTimeout(() => {
+                        this.innerHTML = originalText;
+                    }, 2000);
+                }
+            });
+        });
+
+        // Push configuration toggle buttons
+        document.querySelectorAll('.toggle-push-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const pushId = this.dataset.pushId;
+                const currentState = this.dataset.currentState;
+                const newState = currentState === 'active' ? 'inactive' : 'active';
+                
+                fetch('/api/toggle_push', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        push_id: pushId,
+                        new_state: newState
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Reload the page to reflect changes
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Failed to toggle push'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while toggling push');
+                });
+            });
+        });
+
+        // Edit push URL functionality
+        let currentPushId = null;
+        const editPushModal = new bootstrap.Modal(document.getElementById('editPushModal'));
+        
+        document.querySelectorAll('.edit-push-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                currentPushId = this.dataset.pushId;
+                document.getElementById('pushUrlInput').value = this.dataset.currentUrl;
+                editPushModal.show();
+            });
+        });
+        
+        document.getElementById('savePushUrlBtn').addEventListener('click', function() {
+            const newUrl = document.getElementById('pushUrlInput').value.trim();
+            
+            if (!newUrl.match(/^(rtmp|rtmps|srt):\/\//)) {
+                alert('URL must start with rtmp://, rtmps://, or srt://');
+                return;
+            }
+            
+            fetch('/api/update_push_url', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    push_id: currentPushId,
+                    new_url: newUrl
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    editPushModal.hide();
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to update URL'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while updating URL');
+            });
+        });
+    </script>
+</body>
+</html>
