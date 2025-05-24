@@ -843,35 +843,5 @@ const maxRetries = 3;
                                   // Start periodic updates (every second)
                                   setInterval(updateStreamData, 1000);
     </script>
-    <script>
-// Function to update connection times
-async function updateConntimes() {
-    try {
-        const response = await fetch('/api/stream_conntimes');
-        const data = await response.json();
-        
-        // Update each stream's conntime
-        Object.entries(data.conntimes).forEach(([streamName, conntime]) => {
-            const elements = document.querySelectorAll(`.stream-card-container[data-stream-name="${streamName}"] .stream-conntime`);
-            elements.forEach(el => {
-                el.textContent = conntime;
-            });
-        });
-    } catch (error) {
-        console.error('Error updating connection times:', error);
-    }
-}
-
-// Update immediately and then every second
-updateConntimes();
-setInterval(updateConntimes, 1000);
-
-// Also update when the page gains focus
-document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-        updateConntimes();
-    }
-});
-</script>
   </body>
 </html>

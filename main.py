@@ -17,9 +17,6 @@ from database.models.models import User, UserPushLimit
 from endpoints import admin, auth
 from database.db.db_connection import engine, Base, get_db
 from database.schemas import schemas
-from fastapi import WebSocket
-from fastapi.websockets import WebSocketDisconnect
-
 
 # Initialize FastAPI
 app = FastAPI(
@@ -216,9 +213,9 @@ class StreamMonitor:
             return {}
 
     async def get_stream_input_stats(self, stream_name: str) -> List[Dict]:
-        """Get input statistics for a specific stream with proper error handling"""
+        """Get input statistics for a specific stream"""
         try:
-            # URL encode the stream name
+            # URL encode the stream name if it contains special characters like '+'
             encoded_stream = requests.utils.quote(stream_name)
             
             # Use API2 for more detailed stats
@@ -240,73 +237,42 @@ class StreamMonitor:
                 print(f"Failed to get input stats: HTTP {resp.status_code}")
                 return []
                 
-            try:
-                data = resp.json()
-            except ValueError:
-                print("Invalid JSON response from API")
-                return []
+            data = resp.json()
             
-            # Validate and process the response
-            if not isinstance(data, dict):
-                print("Invalid API response format")
-                return []
-                
-            clients = data.get("clients")
-            if not isinstance(clients, list):
-                print("No clients data in response")
-                return []
-                
+            # Process the input stats
             input_stats = []
-            for client in clients:
-                if not isinstance(client, dict):
-                    continue
+            for client in data.get("clients", []):
+                for row in client.get("data", []):
+                    # Map fields to values
+                    stats = dict(zip(client.get("fields", []), row))
                     
-                fields = client.get("fields", [])
-                data_rows = client.get("data", [])
-                
-                if not isinstance(fields, list) or not isinstance(data_rows, list):
-                    continue
+                    # Convert bytes to MB/GB and calculate bitrates
+                    stats["down_mb"] = round(stats.get("down", 0) / (1024 * 1024), 2)
+                    stats["down_gb"] = round(stats["down_mb"] / 1024, 2)
+                    stats["down_bps"] = stats.get("downbps", 0)
+                    stats["down_mbps"] = round(stats["down_bps"] / (1024 * 1024), 2)
                     
-                for row in data_rows:
-                    if not isinstance(row, list) or len(row) != len(fields):
-                        continue
-                        
-                    try:
-                        stats = dict(zip(fields, row))
-                        
-                        # Convert bytes to MB/GB and calculate bitrates
-                        stats["down_mb"] = round(stats.get("down", 0) / (1024 * 1024), 2)
-                        stats["down_gb"] = round(stats["down_mb"] / 1024, 2)
-                        stats["down_bps"] = stats.get("downbps", 0)
-                        stats["down_mbps"] = round(stats["down_bps"] / (1024 * 1024), 2)
-                        
-                        input_stats.append({
-                            "host": stats.get("host", "N/A"),
-                            "protocol": stats.get("protocol", "N/A").split(":")[-1],
-                            "connected_time": stats.get("conntime", 0),
-                            "data_downloaded_mb": stats["down_mb"],
-                            "data_downloaded_gb": stats["down_gb"],
-                            "current_bitrate": stats["down_bps"],
-                            "current_bitrate_mbps": stats["down_mbps"],
-                            "raw_stats": stats  # Keep raw data for debugging
-                        })
-                    except Exception as e:
-                        print(f"Error processing stats row: {e}")
-                        continue
-                        
+                    input_stats.append({
+                        "host": stats.get("host", "N/A"),
+                        "protocol": stats.get("protocol", "N/A").split(":")[-1],
+                        "connected_time": stats.get("conntime", 0),
+                        "data_downloaded_mb": stats["down_mb"],
+                        "data_downloaded_gb": stats["down_gb"],
+                        "current_bitrate": stats["down_bps"],
+                        "current_bitrate_mbps": stats["down_mbps"],
+                        "raw_stats": stats  # Keep raw data for debugging
+                    })
+                    
             return input_stats
             
-        except requests.exceptions.RequestException as e:
-            print(f"Request error getting input stats: {e}")
-            return []
         except Exception as e:
-            print(f"Unexpected error getting input stats: {e}")
+            print(f"Error getting input stats: {e}")
             return []
-        
+
     async def update_stream_stats(self):
         while True:
             try:
-                await asyncio.sleep(1)  # Update every second
+                await asyncio.sleep(1)
                 
                 # Re-authenticate if connection fails
                 if not self._check_connection():
@@ -320,7 +286,7 @@ class StreamMonitor:
                 # Get viewer counts from active_streams API
                 active_streams = await self.get_active_streams_viewers()
                 
-                # Get full stream data
+                # Get full stream data (we still need this for other info)
                 try:
                     resp = self.session.get(self.base_url, timeout=10)
                     data = resp.json()
@@ -338,20 +304,15 @@ class StreamMonitor:
                             "embed_id": str(uuid.uuid4())[:8]
                         }
 
-                    # Get viewer count from active_streams API
+                    # Get viewer count from active_streams API (more accurate)
                     current_viewers = active_streams.get(stream_name, [0])[0]
                     is_online = stream_info.get("online", 0) == 1
                     current_time = datetime.now()
 
-                    # Get input stats safely
-                    input_stats = await self.get_stream_input_stats(stream_name)
-                    conntime = input_stats[0].get("connected_time", 0) if input_stats else 0
-
                     self.stream_data[stream_name].update({
                         "current_viewers": current_viewers,
                         "is_online": is_online,
-                        "last_updated": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "conntime": str(timedelta(seconds=conntime))  # Update conntime every second
+                        "last_updated": current_time.strftime("%Y-%m-%d %H:%M:%S")
                     })
 
                     # Update history
@@ -551,7 +512,6 @@ async def dashboard(request: Request, current_user: User = Depends(get_current_u
                 "last_updated": stream_info.get("last_updated", "N/A"),
                 "tags": stream_info.get("tags", []),
                 "processes": len(stream_info.get("processes", [])),
-                "conntime": stream_info.get("conntime", "N/A"),
                 "uptime": uptime_str,
                 "embed_id": stream_info.get("embed_id", str(uuid.uuid4())[:8]),
                 "push_count": len(push_configs),
@@ -647,8 +607,7 @@ async def get_stream_input_stats(
     
     stats = await monitor.get_stream_input_stats(stream_name)
     return {"input_stats": stats}
-
-
+    
 # ==================== API Routes ====================
 
 @app.get("/api/stream_views")
@@ -663,16 +622,6 @@ async def get_stream_views():
         for stream_name, stream_info in monitor.stream_data.items()
     }
 
-
-@app.get("/api/stream_conntimes", response_class=JSONResponse)
-async def get_stream_conntimes():
-    """API endpoint for stream connection times"""
-    conntimes = {}
-    for stream_name, stream_info in monitor.stream_data.items():
-        input_stats = await monitor.get_stream_input_stats(stream_name)
-        conntime = input_stats[0].get("connected_time", 0) if input_stats else 0
-        conntimes[stream_name] = str(timedelta(seconds=conntime))
-    return {"conntimes": conntimes}
 
 @app.get("/api/user/push_limit")
 async def get_user_push_limit(
