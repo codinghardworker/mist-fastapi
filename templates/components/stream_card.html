@@ -31,6 +31,13 @@
             <span class="stream-viewers">{{ stream.current_viewers }}</span>
           </p>
         </div>
+        <div class="col-6">
+  <p>
+    <strong>Connected Time:</strong>
+    <span class="stream-conntime">{{ stream.conntime }}</span>
+  </p>
+</div>
+
       </div>
 
       {% if stream.push_count > 0 %}

@@ -15,6 +15,7 @@
         .stream-url { font-family: monospace; font-size: 0.9rem; }
         .url-badge { cursor: pointer; }
         .url-badge:hover { opacity: 0.8; }
+        
     </style>
 </head>
 <body>
@@ -67,8 +68,8 @@
                             <div class="col-md-4">
                                 <div class="card bg-light">
                                     <div class="card-body text-center">
-                                        <h5 class="card-title">Uptime</h5>
-                                        <p class="card-text display-6">{{ stream.uptime }}</p>
+                                        <h5 class="card-title">Connection Time</h5>
+                                        
                                     </div>
                                 </div>
                             </div>
@@ -180,6 +181,23 @@
                     </div>
                 </div>
 
+
+                <!-- Input Statistics Card -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-input-cursor"></i> Input Statistics
+    </div>
+    <div class="card-body">
+        <div id="inputStatsContainer">
+            <!-- Stats will be loaded here dynamically -->
+            <div class="text-center py-3">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
                 <!-- Embed Code Card -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -435,6 +453,63 @@
                 alert('An error occurred while updating URL');
             });
         });
+
+        // Function to update input stats
+function updateInputStats() {
+    fetch(`/api/stream/{{ original_name }}/input_stats`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('inputStatsContainer');
+            
+            if (data.input_stats.length === 0) {
+                container.innerHTML = `
+                    <div class="alert alert-info">
+                        No active input connections for this stream.
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '';
+            data.input_stats.forEach((stats, index) => {
+                // Format connection time
+                const hours = Math.floor(stats.connected_time / 3600);
+                const minutes = Math.floor((stats.connected_time % 3600) / 60);
+                const seconds = stats.connected_time % 60;
+                const connTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                
+                html += `
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            Input #${index + 1}
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <p><strong>Host:</strong> ${stats.host}</p>
+                                    <p><strong>Protocol:</strong> ${stats.protocol}</p>
+                                    <p><strong>Connected:</strong> ${connTime}</p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p><strong>Data Downloaded:</strong> <br/>${stats.data_downloaded_gb.toFixed(2)} GB, ${stats.data_downloaded_mb.toFixed(2)} MB </p>
+                                    <p><strong>Current Bitrate:</strong> ${stats.current_bitrate_mbps.toFixed(2)} Mbps</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Error fetching input stats:', error);
+        });
+}
+
+// Update immediately and then every second
+updateInputStats();
+setInterval(updateInputStats, 1000);
     </script>
 </body>
 </html>
