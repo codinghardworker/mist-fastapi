@@ -361,10 +361,7 @@
         function populateTagFilter() {
             const tagFilter = document.getElementById('tagFilter');
             tagFilter.innerHTML = '<option value="">All Tags</option>';
-            
-            // Add "Select Tag" option for unassigned users
-            tagFilter.innerHTML += '<option value="Select Tag">Select Tag</option>';
-            
+                        
             availableTags.forEach(tag => {
                 tagFilter.innerHTML += `<option value="${tag}">${tag}</option>`;
             });
