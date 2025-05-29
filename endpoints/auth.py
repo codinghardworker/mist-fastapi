@@ -6,8 +6,10 @@ import logging
 import smtplib
 from uuid import uuid4
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Dict
 
+from fastapi.responses import RedirectResponse
+from database.models.models import User
 from fastapi import APIRouter, Depends, status, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -29,7 +31,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
 SENDER_EMAIL = "techcoderhelp@gmail.com"
 SENDER_PASSWORD = "zvqe jxlp asgk hdcj"
-ADMIN_EMAIL = "admin@yourdomain.com"
+ADMIN_EMAIL = "admin@livefusion.com"
 
 
 # Temporary in-memory storage
@@ -85,17 +87,43 @@ def send_reset_link(email: str, reset_link: str) -> bool:
         f"Click the link to reset your password:\n{reset_link}\n\nExpires in 1 hour."
     )
 
-def notify_admin_of_registration(user_data: dict) -> bool:
+
+# Add these new helper functions
+async def send_user_registration_email(email: str, db: Session) -> bool:
     return send_email(
-        ADMIN_EMAIL,
-        "New User Registered",
-        f"Username: {user_data['username']}\nEmail: {user_data['email']}\nTime: {datetime.now()}"
+        email,
+        "Registration Successful",
+        "Your account has been created. An admin will assign stream access to you soon."
     )
+
+async def send_admin_tag_assignment_email(user_data: dict, db: Session) -> bool:
+    """Send notification to admins about new user registration"""
+    # Get all admin emails
+    admin_emails = [user.email for user in db.query(models.User).filter(models.User.role == "admin").all()]
+    domain = os.getenv('DOMAIN', 'http://localhost:8000')
+    assignment_url = f"{domain}/dashboard/admin"
+    
+    # Send to all admins
+    results = []
+    for admin_email in admin_emails:
+        results.append(send_email(
+            admin_email,
+            "New User Registration - Tag Assignment Required",
+            f"""
+            A new user has registered:\n
+            Username: {user_data['username']}\n
+            Email: {user_data['email']}\n\n
+            Please log in to the admin dashboard to assign stream tags to this user.\n\n
+            Url: {assignment_url}
+            """
+        ))
+    
+    return all(results)
 
 # ============================== Endpoints ==============================
 
 @router.post("/register", status_code=status.HTTP_200_OK)
-def register_user(request: RegistrationRequest, db: Session = Depends(get_db)):
+async def register_user(request: RegistrationRequest, db: Session = Depends(get_db)):
     if request.password1 != request.password2:
         raise HTTPException(400, detail="Passwords do not match")
     if len(request.password1) < 8 or not any(c.isdigit() for c in request.password1):
@@ -114,7 +142,8 @@ def register_user(request: RegistrationRequest, db: Session = Depends(get_db)):
         "user_data": {
             "username": request.username,
             "email": request.email,
-            "password": request.password1
+            "password": request.password1,
+            "allowed_tags": "No Stream is Assigned to you currently, admin will assign you soon"
         }
     }
 
@@ -123,8 +152,9 @@ def register_user(request: RegistrationRequest, db: Session = Depends(get_db)):
 
     return {"message": "OTP sent to email"}
 
+# Update the verify-otp endpoint
 @router.post("/verify-otp", status_code=status.HTTP_200_OK)
-def verify_otp(request: OTPRequest, db: Session = Depends(get_db)):
+async def verify_otp(request: OTPRequest, db: Session = Depends(get_db)):
     record = otp_storage.get(request.email)
     if not record or time.time() > record["expiry"]:
         otp_storage.pop(request.email, None)
@@ -137,17 +167,24 @@ def verify_otp(request: OTPRequest, db: Session = Depends(get_db)):
         username=user_data["username"],
         email=user_data["email"],
         password=Hash.bcrypt(user_data["password"]),
-        is_active=True
+        is_active=True,
+        allowed_tags=user_data["allowed_tags"],
+        role="user"  # Explicitly set role
     )
     try:
         db.add(user)
         db.commit()
-        notify_admin_of_registration(user_data)
-        send_email(user.email, "Registration Successful", "Your account has been created.")
+        
+        # Send email to user
+        await send_user_registration_email(user.email, db)
+        
+        # Send email to all admins
+        await send_admin_tag_assignment_email(user_data, db)
+            
         return {"message": "Registration successful"}
-    except Exception:
+    except Exception as e:
         db.rollback()
-        raise HTTPException(500, detail="Failed to create user")
+        raise HTTPException(500, detail=f"Failed to create user: {str(e)}")
     finally:
         otp_storage.pop(request.email, None)
 

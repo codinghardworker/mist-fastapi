@@ -1,7 +1,9 @@
-from fastapi import FastAPI, Request, HTTPException, status, Depends
+from fastapi import FastAPI, Form, Request, HTTPException, status, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from jose import JWTError
+import jwt
 from sqlalchemy.orm import Session
 import requests
 import hashlib
@@ -13,10 +15,13 @@ import json
 import uuid
 from typing import Dict, List, Optional
 from database.auth.oauth2 import get_current_user, get_current_user_optional
+from database.auth.token import ALGORITHM, SECRET_KEY
 from database.models.models import User, UserPushLimit
 from endpoints import admin, auth
+from endpoints.auth import otp_storage, send_email
 from database.db.db_connection import engine, Base, get_db
-from database.schemas import schemas
+import time
+
 
 # Initialize FastAPI
 app = FastAPI(
@@ -156,6 +161,24 @@ class StreamMonitor:
         except Exception as e:
             print(f"Initial update error: {e}")
 
+    async def get_available_tags(self) -> List[str]:
+        """Fetch all available tags from MistServer dynamically"""
+        try:
+            if not self._check_connection():
+                self.authenticate()
+            
+            resp = self.session.get(self.base_url)
+            data = resp.json()
+            
+            tags = set()
+            for stream in data.get("streams", {}).values():
+                tags.update(stream.get("tags", []))
+            
+            return sorted(list(tags))
+        except Exception as e:
+            print(f"Error fetching tags: {e}")
+            return []  # Return empty list to handle in UI
+        
     async def get_push_configurations(self):
         """Fetch ALL push configurations with proper error handling and locking"""
         async with self.push_configs_lock:  # Ensure thread-safe access
@@ -446,6 +469,76 @@ async def not_found_exception_handler(request: Request, exc: HTTPException):
     return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
 
+@app.get("/available-tags")
+async def get_available_tags(current_user: User = Depends(get_current_user)):
+    """Get all available tags, returns default tags if none available"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    default_tags = ["1000", "1001", "1002"]
+    
+    try:
+        resp = monitor.session.get(monitor.base_url)
+        data = resp.json()
+        tags = set()
+        
+        # Extract tags from streams
+        for stream in data.get("streams", {}).values():
+            tags.update(stream.get("tags", []))
+        
+        # If we found tags, return them sorted
+        if tags:
+            return {"tags": sorted(list(tags))}
+        
+        # Otherwise return default tags
+        return {"tags": default_tags}
+        
+    except Exception as e:
+        # If there's an error fetching tags, return default tags
+        return {"tags": default_tags}
+
+
+@app.get("/dashboard/admin", response_class=HTMLResponse)
+async def admin_dashboard(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Admin dashboard page"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    # Get all users with their push limits
+    users = db.query(User).all()
+    user_data = []
+    for user in users:
+        user_limit = db.query(UserPushLimit).filter(UserPushLimit.user_id == user.id).first()
+        user_data.append({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "is_active": user.is_active,
+            "allowed_tags": user.allowed_tags,
+            "push_limit": {
+                "max_concurrent_pushes": user_limit.max_concurrent_pushes if user_limit else 1,
+                "current_pushes": user_limit.current_pushes if user_limit else 0
+            } if user_limit else None
+        })
+    
+    return templates.TemplateResponse(
+        "admin_dashboard.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "users": user_data
+        }
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Render login page"""
@@ -474,22 +567,40 @@ async def verify_otp_page(request: Request):
     """Render OTP verification page"""
     return templates.TemplateResponse("verify_otp.html", {"request": request})
 
+  
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, current_user: User = Depends(get_current_user)):
     """Main dashboard showing all streams (protected route)"""
     try:
+            # Check if user has no tags assigned
+        if "No Stream is Assigned" in current_user.allowed_tags:
+            return templates.TemplateResponse(
+                "no_access.html",
+                {
+                    "request": request,
+                    "message": current_user.allowed_tags,
+                    "current_user": current_user
+                }
+            )
+        
         # Initialize metrics
         total_viewers = 0
         online_streams = 0
         streams_data = []
         await monitor.get_push_configurations()
 
+        # Get user's allowed tags (split comma-separated string into list)
+        user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
+
         # Process each stream
         for stream_name, stream_info in monitor.stream_data.items():
             push_configs = monitor.get_push_info_for_stream(stream_name)
-            # For non-admin users, only include streams with tag "1001"
+            
+            # For non-admin users, filter streams based on allowed tags
             if current_user.role != "admin":
-                if "1001" not in stream_info.get("tags", []):
+                stream_tags = set(stream_info.get("tags", []))
+                # Only include streams that share at least one tag with user's allowed tags
+                if not user_tags or not any(tag in user_tags for tag in stream_tags):
                     continue
             
             # Get display name from mapping or use original name
@@ -563,13 +674,17 @@ async def stream_detail(request: Request, stream_name: str, current_user: User =
     if not stream:
         return HTMLResponse("Stream not found", status_code=404)
     
-    # Check access for non-admin users
-    if current_user.role != "admin" and "1001" not in stream.get("tags", []):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to access this stream"
-        )
+    # Get user's allowed tags
+    user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
     
+    # Check access for non-admin users
+    if current_user.role != "admin":
+        stream_tags = set(stream.get("tags", []))
+        if not user_tags or not any(tag in user_tags for tag in stream_tags):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this stream"
+            )
     # Get appropriate name to display based on user role
     display_name = STREAM_DISPLAY_NAMES.get(original_name, original_name)
     name_to_display = display_name if current_user.role != "admin" else original_name
@@ -602,8 +717,14 @@ async def get_stream_input_stats(
     if not stream:
         raise HTTPException(status_code=404, detail="Stream not found")
     
-    if current_user.role != "admin" and "1001" not in stream.get("tags", []):
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Get user's allowed tags
+    user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
+    
+    # Check access for non-admin users
+    if current_user.role != "admin":
+        stream_tags = set(stream.get("tags", []))
+        if not user_tags or not any(tag in user_tags for tag in stream_tags):
+            raise HTTPException(status_code=403, detail="Access denied")
     
     stats = await monitor.get_stream_input_stats(stream_name)
     return {"input_stats": stats}
@@ -703,9 +824,17 @@ async def reset_stream(
         if stream_name not in monitor.stream_data:
             return JSONResponse({"success": False, "error": "Stream not found"}, status_code=404)
         
-        # Check if user has permission (admin or stream has 1001 tag)
-        if current_user.role != "admin" and "1001" not in monitor.stream_data[stream_name].get("tags", []):
-            return JSONResponse({"success": False, "error": "You don't have permission to reset this stream"}, status_code=403)
+        # Get user's allowed tags
+        user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
+        
+        # Check if user has permission (admin or stream shares any tag with user's allowed tags)
+        if current_user.role != "admin":
+            stream_tags = set(monitor.stream_data[stream_name].get("tags", []))
+            if not user_tags or not any(tag in user_tags for tag in stream_tags):
+                return JSONResponse(
+                    {"success": False, "error": "You don't have permission to reset this stream"}, 
+                    status_code=403
+                )
         
         # Prepare the nuke_stream command
         nuke_cmd = {
@@ -724,7 +853,7 @@ async def reset_stream(
         
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-
+        
 @app.post("/api/toggle_push")
 async def toggle_push(
     request: Request,
@@ -807,11 +936,16 @@ async def get_streams_api(current_user: User = Depends(get_current_user)):
     await monitor.get_push_configurations()
     response_data = {}
     
+    # Get user's allowed tags
+    user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
+    
     for stream_name, stream_info in monitor.stream_data.items():
         push_info = monitor.get_push_info_for_stream(stream_name)
-        # For non-admin users, only include streams with tag "1001"
+        
+        # For non-admin users, filter streams based on allowed tags
         if current_user.role != "admin":
-            if "1001" not in stream_info.get("tags", []):
+            stream_tags = set(stream_info.get("tags", []))
+            if not user_tags or not any(tag in user_tags for tag in stream_tags):
                 continue
         
         # Include all stream data with display name if mapped

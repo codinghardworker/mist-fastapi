@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Pending</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        * { 
+            font-family: 'Inter', -apple-system, system-ui, sans-serif; 
+        }
+        
+        .loading-dots {
+            animation: loading 1.5s infinite;
+        }
+        
+        .loading-dots:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .loading-dots:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes loading {
+            0%, 20%, 50%, 80%, 100% {
+                transform: translateY(0);
+                opacity: 0.5;
+            }
+            40% {
+                transform: translateY(-4px);
+                opacity: 1;
+            }
+        }
+        
+        .pulse-soft {
+            animation: pulseSoft 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulseSoft {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+    
+    <div class="w-full max-w-md">
+        <!-- Main card -->
+        <div class="bg-white rounded-xl shadow-sm border p-7 text-center">
+            <!-- Status icon -->
+            <div class="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center mx-auto mb-4 pulse-soft">
+                <i class="fas fa-clock text-amber-600 text-lg"></i>
+            </div>
+            
+            <!-- Title -->
+            <h1 class="text-xl font-semibold text-slate-900 mb-1">Access Pending</h1>
+            <p class="text-slate-600 text-sm mb-6">Your request is being processed</p>
+            
+            <!-- Status message -->
+            <div class="bg-amber-50 border-l-4 border-amber-400 p-4 mb-6 text-left">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-info-circle text-amber-400"></i>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-amber-800 leading-relaxed">
+                            {{ message }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Loading indicator -->
+            <div class="flex justify-center space-x-1 mb-6">
+                <div class="w-2 h-2 bg-slate-400 rounded-full loading-dots"></div>
+                <div class="w-2 h-2 bg-slate-400 rounded-full loading-dots"></div>
+                <div class="w-2 h-2 bg-slate-400 rounded-full loading-dots"></div>
+            </div>
+            
+            <!-- Information section -->
+            <div class="space-y-3 text-sm mb-8">
+                <div class="flex items-center justify-center space-x-2 text-slate-600">
+                    <i class="fas fa-user-shield text-blue-600 w-4"></i>
+                    <span>Waiting for admin approval</span>
+                </div>
+                
+                <div class="flex items-center justify-center space-x-2 text-slate-600">
+                    <i class="fas fa-envelope text-green-600 w-4"></i>
+                    <span>Email notification will be sent</span>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="pt-6 border-t border-slate-200">
+                <p class="text-xs text-slate-500 mb-4">
+                    Typically takes 1-2 business days
+                </p>
+                
+                <!-- Refresh button -->
+                <button onclick="window.location.reload()" class="w-full bg-blue-600 text-white py-2.5 px-4 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2">
+                    <i class="fas fa-sync-alt text-xs"></i>
+                    <span>Refresh Status</span>
+                </button>
+            </div>
+        </div>
+        
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Auto-refresh every 30 seconds with visual feedback
+            setInterval(() => {
+                const refreshBtn = document.querySelector('button');
+                const icon = refreshBtn.querySelector('i');
+                
+                // Add rotation animation
+                icon.style.transform = 'rotate(360deg)';
+                icon.style.transition = 'transform 0.5s ease';
+                
+                // Reset after animation
+                setTimeout(() => {
+                    icon.style.transform = 'rotate(0deg)';
+                }, 500);
+            }, 30000);
+            
+            // Add subtle pulse to the refresh button periodically
+            setInterval(() => {
+                const refreshBtn = document.querySelector('button');
+                refreshBtn.classList.add('animate-pulse');
+                setTimeout(() => {
+                    refreshBtn.classList.remove('animate-pulse');
+                }, 2000);
+            }, 10000);
+        });
+    </script>
+</body>
+</html>
