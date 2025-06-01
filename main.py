@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 from database.auth.oauth2 import get_current_user, get_current_user_optional
 from database.auth.token import ALGORITHM, SECRET_KEY
 from database.models.models import AppSettings, User, UserPushLimit
+from database.schemas import schemas
 from endpoints import admin, auth
 from endpoints.auth import otp_storage, send_email
 from database.db.db_connection import engine, Base, get_db
@@ -632,6 +633,73 @@ async def admin_dashboard(
             "users": user_data
         }
     )
+
+@app.get("/settings", response_model=List[schemas.AppSettingsOut])
+def get_all_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all settings (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    return db.query(AppSettings).all()
+
+@app.get("/settings/{key}", response_model=schemas.AppSettingsOut)
+def get_setting(
+    key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get a specific setting (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+        
+    setting = db.query(AppSettings).filter(AppSettings.key == key).first()
+    if not setting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Setting not found"
+        )
+    return setting
+
+@app.put("/settings/{key}", response_model=schemas.AppSettingsOut)
+def update_setting(
+    key: str,
+    setting_update: schemas.AppSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update a setting (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+        
+    setting = db.query(AppSettings).filter(AppSettings.key == key).first()
+    if not setting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Setting not found"
+        )
+            
+    setting.value = setting_update.value
+    setting.updated_at = datetime.utcnow()
+    setting.updated_by = current_user.id
+    
+    # Update environment variable in runtime
+    os.environ[key] = setting_update.value
+    
+    db.commit()
+    db.refresh(setting)
+    
+    return setting
 
 
 @app.get("/dashboard/settings", response_class=HTMLResponse)
