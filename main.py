@@ -1003,7 +1003,6 @@ async def reset_stream(
     request: Request,
     current_user: User = Depends(get_current_user)
 ):
-    """Reset a stream using Mist API's nuke_stream command"""
     try:
         data = await request.json()
         stream_name = data.get("stream_name")
@@ -1012,27 +1011,26 @@ async def reset_stream(
         if stream_name not in monitor.stream_data:
             return JSONResponse({"success": False, "error": "Stream not found"}, status_code=404)
         
-        # Get user's allowed tags
-        user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
-        
-        # Check if user has permission (admin or stream shares any tag with user's allowed tags)
+        # Check permissions
         if current_user.role != "admin":
+            user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
             stream_tags = set(monitor.stream_data[stream_name].get("tags", []))
             if not user_tags or not any(tag in user_tags for tag in stream_tags):
                 return JSONResponse(
-                    {"success": False, "error": "You don't have permission to reset this stream"}, 
+                    {"success": False, "error": "Permission denied"}, 
                     status_code=403
                 )
         
         # Prepare the nuke_stream command
-        nuke_cmd = {
-            "nuke_stream": stream_name
-        }
+        nuke_cmd = {"nuke_stream": stream_name}
         
         # Send the command to MistServer
-        resp = monitor.session.get(monitor.base_url, params={"command": json.dumps(nuke_cmd)})
+        resp = monitor.session.get(
+            monitor.base_url, 
+            params={"command": json.dumps(nuke_cmd)},
+            timeout=5
+        )
         
-        # Check response more thoroughly
         if resp.status_code != 200:
             error_msg = f"MistServer returned HTTP {resp.status_code}"
             try:
@@ -1046,9 +1044,17 @@ async def reset_stream(
                 status_code=400
             )
         
-        # Force update the stream data immediately
-        monitor.stream_data[stream_name]["is_online"] = False
-        monitor.stream_data[stream_name]["current_viewers"] = 0
+        # Update stream state with timestamp
+        current_time = datetime.now()
+        monitor.stream_data[stream_name].update({
+            "is_online": False,
+            "current_viewers": 0,
+            "last_updated": current_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "reset_time": current_time.isoformat()  # Track when reset occurred
+        })
+        
+        # Schedule a check to see if stream comes back
+        asyncio.create_task(check_stream_recovery(stream_name))
         
         return JSONResponse({
             "success": True,
@@ -1056,9 +1062,32 @@ async def reset_stream(
         })
         
     except Exception as e:
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)      
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
-
+async def check_stream_recovery(stream_name: str, attempts=5, delay=3):
+    """Check if stream recovers after reset"""
+    for i in range(attempts):
+        await asyncio.sleep(delay * (i + 1))  # Increasing delay
+        
+        try:
+            # Get fresh stream data from MistServer
+            resp = monitor.session.get(monitor.base_url)
+            data = resp.json()
+            stream_info = data.get("streams", {}).get(stream_name, {})
+            
+            if stream_info.get("online", 0) == 1:
+                # Stream is back online - update our data
+                current_time = datetime.now()
+                monitor.stream_data[stream_name].update({
+                    "is_online": True,
+                    "current_viewers": len(stream_info.get("processes", [])),
+                    "last_updated": current_time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+                break
+                
+        except Exception as e:
+            print(f"Error checking stream recovery: {str(e)}")
+            
 @app.post("/api/toggle_push")
 async def toggle_push(
     request: Request,
