@@ -21,28 +21,6 @@
             readonly
           />
         </div>
-        {% if current_user.role == "admin" %}
-        <div class="mb-3">
-          <label class="form-label">Set User Push Limit</label>
-          <div class="input-group">
-            <input
-              type="text"
-              class="form-control"
-              id="userEmail"
-              placeholder="User email"
-            />
-            <input
-              type="number"
-              class="form-control"
-              id="newPushLimit"
-              placeholder="Max pushes"
-            />
-            <button class="btn btn-primary" id="setPushLimitBtn">
-              Set
-            </button>
-          </div>
-        </div>
-        {% endif %}
       </div>
       <div class="modal-footer">
         <button

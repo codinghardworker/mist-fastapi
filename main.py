@@ -16,10 +16,12 @@ import uuid
 from typing import Dict, List, Optional
 from database.auth.oauth2 import get_current_user, get_current_user_optional
 from database.auth.token import ALGORITHM, SECRET_KEY
-from database.models.models import User, UserPushLimit
+from database.models.models import AppSettings, User, UserPushLimit
 from endpoints import admin, auth
 from endpoints.auth import otp_storage, send_email
 from database.db.db_connection import engine, Base, get_db
+from endpoints import admin, auth, settings
+from endpoints.settings import get_setting_value, initialize_settings_on_startup
 import time
 
 
@@ -40,6 +42,7 @@ STREAM_DISPLAY_NAMES = {
 
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(settings.router)
 
 # Load templates
 templates = Jinja2Templates(directory="templates")
@@ -54,18 +57,61 @@ Base.metadata.create_all(bind=engine)
 load_dotenv()
 
 class StreamMonitor:
-    def __init__(self):
-        self.base_url = f"http://{os.getenv('MIST_HOST')}:{os.getenv('MIST_PORT')}/api"
-        self.api2_url = f"http://{os.getenv('MIST_HOST')}:{os.getenv('MIST_PORT')}/api2"  # New API2 endpoint
-        self.username = os.getenv('MIST_USERNAME')
-        self.password = os.getenv('MIST_PASSWORD')
+    def __init__(self, db: Session):
+        self.db = db
         self.session = requests.Session()
         self.stream_data = {}
         self.last_update_time = datetime.now()
-        self.authenticate()
         self.push_configs = {}
         self.push_configs_last_updated = None
         self.push_configs_lock = asyncio.Lock()
+        self._settings_lock = asyncio.Lock()
+        self._last_settings_update = 0
+        self._initialize_settings()
+
+    def _initialize_settings(self):
+        """Initialize settings from database"""
+        self.settings = {
+            "MIST_HOST": get_setting_value("MIST_HOST", self.db),
+            "MIST_PORT": get_setting_value("MIST_PORT", self.db),
+            "MIST_USERNAME": get_setting_value("MIST_USERNAME", self.db),
+            "MIST_PASSWORD": get_setting_value("MIST_PASSWORD", self.db),
+        }
+        
+        # Required settings
+        self.base_url = f"http://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api"
+        self.api2_url = f"http://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api2"
+        self.username = self.settings['MIST_USERNAME']
+        self.password = self.settings['MIST_PASSWORD']
+        
+        # Authenticate with initial settings
+        self.authenticate()
+
+    async def reload_settings(self):
+        """Reload settings from database and reconnect"""
+        async with self._settings_lock:
+            # Get current settings from DB
+            current_settings = {
+                "MIST_HOST": get_setting_value("MIST_HOST", self.db),
+                "MIST_PORT": get_setting_value("MIST_PORT", self.db),
+                "MIST_USERNAME": get_setting_value("MIST_USERNAME", self.db),
+                "MIST_PASSWORD": get_setting_value("MIST_PASSWORD", self.db),
+            }
+            
+            # Compare with our current settings
+            if current_settings != self.settings:
+                print("Settings changed - reinitializing connection")
+                self.settings = current_settings
+                self.base_url = f"http://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api"
+                self.api2_url = f"http://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api2"
+                self.username = self.settings['MIST_USERNAME']
+                self.password = self.settings['MIST_PASSWORD']
+                
+                # Force reauthentication
+                self.session = requests.Session()  # Create new session
+                self.authenticate()
+                
+            self._last_settings_update = time.time()
 
     def authenticate(self):
         try:
@@ -116,7 +162,6 @@ class StreamMonitor:
             print(f"Authentication error: {e}")
             return False
             
-    # In your StreamMonitor class, modify the initialization:
     async def initialize(self):
         """Async initialization method"""
         await self.get_push_configurations()
@@ -265,39 +310,65 @@ class StreamMonitor:
             # Process the input stats
             input_stats = []
             for client in data.get("clients", []):
+                fields = client.get("fields", [])
                 for row in client.get("data", []):
-                    # Map fields to values
-                    stats = dict(zip(client.get("fields", []), row))
+                    # Create stats dictionary by zipping fields with row values
+                    stats = dict(zip(fields, row))
                     
-                    # Convert bytes to MB/GB and calculate bitrates
-                    stats["down_mb"] = round(stats.get("down", 0) / (1024 * 1024), 2)
-                    stats["down_gb"] = round(stats["down_mb"] / 1024, 2)
-                    stats["down_bps"] = stats.get("downbps", 0)
-                    stats["down_mbps"] = round(stats["down_bps"] / (1024 * 1024), 2)
+                    # Convert bytes to MB/GB and calculate bitrates with default values
+                    down = stats.get("down", 0)
+                    down_bps = stats.get("downbps", 0)
                     
                     input_stats.append({
                         "host": stats.get("host", "N/A"),
                         "protocol": stats.get("protocol", "N/A").split(":")[-1],
                         "connected_time": stats.get("conntime", 0),
-                        "data_downloaded_mb": stats["down_mb"],
-                        "data_downloaded_gb": stats["down_gb"],
-                        "current_bitrate": stats["down_bps"],
-                        "current_bitrate_mbps": stats["down_mbps"],
+                        "data_downloaded_mb": round(down / (1024 * 1024), 2),
+                        "data_downloaded_gb": round(down / (1024 * 1024 * 1024), 2),
+                        "current_bitrate": down_bps,
+                        "current_bitrate_mbps": round(down_bps / (1024 * 1024), 2),
                         "raw_stats": stats  # Keep raw data for debugging
                     })
                     
-            return input_stats
+            return input_stats if input_stats else [{
+                "host": "N/A",
+                "protocol": "N/A",
+                "connected_time": 0,
+                "data_downloaded_mb": 0,
+                "data_downloaded_gb": 0,
+                "current_bitrate": 0,
+                "current_bitrate_mbps": 0,
+                "raw_stats": {}
+            }]
             
+        except requests.exceptions.RequestException as e:
+            print(f"Network error getting input stats: {e}")
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse response JSON: {e}")
         except Exception as e:
             print(f"Error getting input stats: {e}")
-            return []
+        
+        # Return default values if anything fails
+        return [{
+            "host": "N/A",
+            "protocol": "N/A",
+            "connected_time": 0,
+            "data_downloaded_mb": 0,
+            "data_downloaded_gb": 0,
+            "current_bitrate": 0,
+            "current_bitrate_mbps": 0,
+            "raw_stats": {}
+        }]
 
     async def update_stream_stats(self):
         while True:
             try:
                 await asyncio.sleep(1)
                 
-                # Re-authenticate if connection fails
+                # First check if settings changed
+                await self.reload_settings()
+                
+                # Rest of your existing update logic...
                 if not self._check_connection():
                     self.authenticate()
                     
@@ -390,6 +461,10 @@ class StreamMonitor:
                     'deactivated': config_stream_name.startswith('💤deactivated💤_')  # Check prefix for deactivated status
                 })
         return push_info
+    
+    def _get_push_notes(self):
+        """Returns standardized notes for pushes created from dashboard"""
+        return "Push from Live Fusion Dashboard"
 
     def _extract_stream_urls(self, stream_name: str) -> Dict:
         """Extract various stream URLs for a given stream"""
@@ -448,12 +523,24 @@ class StreamMonitor:
   </script>
 </div>"""
 
-# Initialize monitor
-monitor = StreamMonitor()
-
-
 # ==================== Authentication Routes ====================
 
+@app.post("/reconnect-mist", status_code=status.HTTP_200_OK)
+async def reconnect_mist(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Force reconnection to MistServer with new settings"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    # Force settings reload and reconnection
+    await monitor.reload_settings()
+    
+    return {"message": "Reconnected to MistServer with updated settings"}
 
 @app.get("/", response_class=RedirectResponse)
 async def root_redirect(request: Request):
@@ -539,6 +626,27 @@ async def admin_dashboard(
     )
 
 
+@app.get("/dashboard/settings", response_class=HTMLResponse)
+async def settings_page(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Settings page"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    return templates.TemplateResponse(
+        "settings.html",
+        {
+            "request": request,
+            "current_user": current_user
+        }
+    )
+  
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Render login page"""
@@ -572,50 +680,47 @@ async def verify_otp_page(request: Request):
 async def dashboard(request: Request, current_user: User = Depends(get_current_user)):
     """Main dashboard showing all streams (protected route)"""
     try:
-            # Check if user has no tags assigned
-        if "No Stream is Assigned" in current_user.allowed_tags:
-            return templates.TemplateResponse(
-                "no_access.html",
-                {
-                    "request": request,
-                    "message": current_user.allowed_tags,
-                    "current_user": current_user
-                }
-            )
+        # Admin bypasses tag check
+        if current_user.role != "admin":
+            # Check if user has no tags assigned or has the "No Stream is Assigned" message
+            if not current_user.allowed_tags or "No Stream is Assigned" in current_user.allowed_tags:
+                return templates.TemplateResponse(
+                    "no_access.html",
+                    {
+                        "request": request,
+                        "message": current_user.allowed_tags or "No streams are assigned to your account",
+                        "current_user": current_user
+                    }
+                )
         
-        # Initialize metrics
+        # Rest of the dashboard logic remains the same...
         total_viewers = 0
         online_streams = 0
         streams_data = []
         await monitor.get_push_configurations()
 
-        # Get user's allowed tags (split comma-separated string into list)
-        user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
+        # Get user's allowed tags (empty list for admin means show all)
+        user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags and current_user.role != "admin" else []
 
         # Process each stream
         for stream_name, stream_info in monitor.stream_data.items():
             push_configs = monitor.get_push_info_for_stream(stream_name)
-            
             # For non-admin users, filter streams based on allowed tags
             if current_user.role != "admin":
                 stream_tags = set(stream_info.get("tags", []))
-                # Only include streams that share at least one tag with user's allowed tags
                 if not user_tags or not any(tag in user_tags for tag in stream_tags):
                     continue
-            
+                    
             # Get display name from mapping or use original name
             display_name = STREAM_DISPLAY_NAMES.get(stream_name, stream_name)
-            
-            # Get push configurations for this stream
-            push_configs = monitor.get_push_info_for_stream(stream_name)
             
             # Calculate uptime in human-readable format
             uptime_str = str(timedelta(seconds=stream_info.get("uptime", 0)))
             
             # Prepare stream data
             stream_data = {
-                "original_name": display_name if current_user.role != "admin" else stream_name,  # Show display name to users, original to admin
-                "name": stream_name,  # Keep original name for internal use
+                "original_name": display_name if current_user.role != "admin" else stream_name,
+                "name": stream_name,
                 "online": stream_info.get("is_online", False),
                 "current_viewers": stream_info.get("current_viewers", 0),
                 "max_viewers": stream_info.get("max_viewers", 0),
@@ -626,7 +731,8 @@ async def dashboard(request: Request, current_user: User = Depends(get_current_u
                 "uptime": uptime_str,
                 "embed_id": stream_info.get("embed_id", str(uuid.uuid4())[:8]),
                 "push_count": len(push_configs),
-                "push_configs": push_configs  # Use freshly fetched push info
+                "has_push": len(push_configs) > 0,
+                "push_configs": push_configs
             }
             
             # Update metrics
@@ -636,9 +742,13 @@ async def dashboard(request: Request, current_user: User = Depends(get_current_u
                 
             streams_data.append(stream_data)
         
-        # Sort streams by online status (online first) and viewer count (descending)
-        streams_data.sort(key=lambda x: (-x["online"], -x["current_viewers"]))
-        
+        # Sort streams alphabetically by name
+        streams_data.sort(key=lambda x: (
+            get_prefix(x["name"].lower()),  # Group by prefix
+            not x["online"],                # Online first (False < True)
+            x["name"].lower()               # Then sort by full name
+        ))        
+
         # Prepare context for template
         context = {
             "request": request,
@@ -653,14 +763,22 @@ async def dashboard(request: Request, current_user: User = Depends(get_current_u
         return templates.TemplateResponse("dashboard.html", context)
         
     except Exception as e:
-        # Log the error for debugging
         print(f"Error in dashboard route: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while loading the dashboard"
         )
     
-
+def get_prefix(stream_name):
+    # Extract prefix (e.g., "1000-cam1" → "1000", "zout100" → "zout100")
+    if "-" in stream_name:
+        return stream_name.split("-")[0]
+    # Handle cases like "1000out1" → "1000"
+    for i, char in enumerate(stream_name):
+        if not char.isdigit():
+            return stream_name[:i] if i > 0 else stream_name
+    return stream_name
+    
 @app.get("/stream/{stream_name}", response_class=HTMLResponse)
 async def stream_detail(request: Request, stream_name: str, current_user: User = Depends(get_current_user)):
     """Detailed view for a specific stream"""
@@ -706,6 +824,66 @@ async def stream_detail(request: Request, stream_name: str, current_user: User =
         "current_user": current_user
     })
 
+@app.get("/api/stream/{stream_name}/active_pushes")
+async def get_stream_active_pushes(
+    stream_name: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Get active push PIDs and formatted connection times for a specific stream"""
+    try:
+        # Verify stream exists and user has access
+        stream = monitor.stream_data.get(stream_name)
+        if not stream:
+            raise HTTPException(status_code=404, detail="Stream not found")
+        
+        # Check permissions for non-admin users
+        if current_user.role != "admin":
+            user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
+            stream_tags = stream.get("tags", []) or []  # Ensure stream_tags is a list
+            if not user_tags or not any(tag in user_tags for tag in stream_tags):
+                raise HTTPException(status_code=403, detail="Access denied")
+
+        # Get active pushes with error handling
+        try:
+            resp = monitor.session.get(
+                monitor.base_url, 
+                params={"command": json.dumps({"push_list": True})},
+                timeout=5  # Add timeout
+            )
+            resp.raise_for_status()  # Raises exception for 4XX/5XX responses
+            active_pushes = resp.json().get("push_list", []) or []  # Ensure we have a list
+        except Exception as e:
+            active_pushes = []
+
+        # Filter and format pushes
+        result = []
+        for push in active_pushes:
+            # Validate push structure
+            if not isinstance(push, (list, dict)) or len(push) < 6:
+                continue
+                
+            if push[1] == stream_name:  # push[1] is stream name
+                stats = push[5] if len(push) > 5 else {}
+                active_seconds = stats.get("active_seconds", 0)
+                
+                # Format seconds to HH:MM:SS
+                hours, remainder = divmod(active_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                
+                result.append({
+                    "pid": push[0],  # Process ID
+                    "active_seconds": active_seconds,
+                    "formatted_time": formatted_time
+                })
+        
+        return {"pushes": result}
+    
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+    
 @app.get("/api/stream/{stream_name}/input_stats")
 async def get_stream_input_stats(
     stream_name: str, 
@@ -782,7 +960,8 @@ async def update_push_url(request: Request):
             "push_auto_add": {
                 push_id: {
                     **push_config,
-                    "target": new_url
+                    "target": new_url,
+                    "x-LSP-notes": push_config.get("x-LSP-notes", monitor._get_push_notes())
                 }
             }
         }
@@ -805,10 +984,19 @@ async def update_push_url(request: Request):
         
 @app.on_event("startup")
 async def startup_event():
+    # Get database session
+    db = next(get_db())
+    initialize_settings_on_startup()
+
+    # Initialize the monitor with database session
+    global monitor
+    monitor = StreamMonitor(db)
+    
     # Initialize the monitor asynchronously
     await monitor.initialize()
     # Start the background task
     asyncio.create_task(monitor.update_stream_stats())
+    
 
 @app.post("/api/reset_stream")
 async def reset_stream(
@@ -844,16 +1032,33 @@ async def reset_stream(
         # Send the command to MistServer
         resp = monitor.session.get(monitor.base_url, params={"command": json.dumps(nuke_cmd)})
         
-        # There's no response expected from the API for this command
-        # But we'll consider it successful if we got a 200 status code
-        if resp.status_code == 200:
-            return JSONResponse({"success": True})
+        # Check response more thoroughly
+        if resp.status_code != 200:
+            error_msg = f"MistServer returned HTTP {resp.status_code}"
+            try:
+                error_data = resp.json()
+                if "error" in error_data:
+                    error_msg = error_data["error"]
+            except:
+                pass
+            return JSONResponse(
+                {"success": False, "error": error_msg},
+                status_code=400
+            )
         
-        return JSONResponse({"success": False, "error": "Failed to reset stream"}, status_code=400)
+        # Force update the stream data immediately
+        monitor.stream_data[stream_name]["is_online"] = False
+        monitor.stream_data[stream_name]["current_viewers"] = 0
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Stream reset successfully"
+        })
         
     except Exception as e:
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-        
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)      
+
+
 @app.post("/api/toggle_push")
 async def toggle_push(
     request: Request,
@@ -865,6 +1070,13 @@ async def toggle_push(
         push_id = data.get("push_id")
         new_state = data.get("new_state")
         
+        # Validate input
+        if not push_id or not new_state:
+            return JSONResponse({"success": False, "error": "Missing push_id or new_state"}, status_code=400)
+        
+        if new_state not in ("active", "inactive"):
+            return JSONResponse({"success": False, "error": "Invalid state - must be 'active' or 'inactive'"}, status_code=400)
+
         # Verify push configuration exists
         push_config = monitor.push_configs.get(push_id)
         if not push_config:
@@ -877,16 +1089,42 @@ async def toggle_push(
             db.add(user_limit)
         
         current_stream_name = push_config['stream']
+        original_stream_name = current_stream_name.replace('💤deactivated💤_', '')
         
         if new_state == "inactive":
-            # Anyone can deactivate a push
+            # Try to get active pushes, but proceed even if we can't
+            try:
+                resp = monitor.session.get(
+                    monitor.base_url,
+                    params={"command": json.dumps({"push_list": True})}
+                )
+                
+                if resp.status_code == 200:
+                    active_pushes = resp.json().get("push_list", [])
+                    pids_to_stop = []
+                    
+                    for push in active_pushes:
+                        if len(push) >= 2 and push[1] == original_stream_name:
+                            pids_to_stop.append(push[0])
+                    
+                    # Stop any active pushes we found
+                    if pids_to_stop:
+                        stop_cmd = {"push_stop": pids_to_stop[0]} if len(pids_to_stop) == 1 else {"push_stop": pids_to_stop}
+                        stop_resp = monitor.session.get(
+                            monitor.base_url,
+                            params={"command": json.dumps(stop_cmd)}
+                        )
+                        # Even if stopping fails, we'll proceed with deactivation
+            except Exception as e:
+                # Log but continue with deactivation
+                print(f"Warning: Error checking active pushes: {str(e)}")
+            
+            # Update the push config to be deactivated
+            new_stream_name = f"💤deactivated💤_{original_stream_name}"
             if not current_stream_name.startswith('💤deactivated💤_'):
-                new_stream_name = f"💤deactivated💤_{current_stream_name}"
-                user_limit.current_pushes -= 1
-            else:
-                new_stream_name = current_stream_name  # Already deactivated
+                user_limit.current_pushes = max(0, user_limit.current_pushes - 1)
         else:
-            # Check if activating would exceed limit (for non-admins)
+            # Activating - check push limits for non-admins
             if (user_limit.current_pushes >= user_limit.max_concurrent_pushes and 
                 current_user.role != "admin"):
                 return JSONResponse({
@@ -894,11 +1132,11 @@ async def toggle_push(
                     "error": f"Activating would exceed your push limit ({user_limit.max_concurrent_pushes})"
                 }, status_code=400)
             
-            # Allow activation for all users
-            new_stream_name = current_stream_name.replace('💤deactivated💤_', '')
-            user_limit.current_pushes += 1
+            new_stream_name = original_stream_name
+            if current_stream_name.startswith('💤deactivated💤_'):
+                user_limit.current_pushes += 1
         
-        # Prepare the update command
+        # Update the push configuration
         update_cmd = {
             "push_auto_add": {
                 push_id: {
@@ -908,12 +1146,15 @@ async def toggle_push(
             }
         }
         
-        # Send the command to MistServer
-        resp = monitor.session.get(monitor.base_url, params={"command": json.dumps(update_cmd)})
+        # Send the update command to MistServer
+        resp = monitor.session.get(
+            monitor.base_url,
+            params={"command": json.dumps(update_cmd)}
+        )
         if resp.status_code != 200:
             return JSONResponse({"success": False, "error": "Failed to update push configuration"}, status_code=400)
         
-        # Update our local cache and database
+        # Update our local cache and commit database changes
         monitor.push_configs[push_id]['stream'] = new_stream_name
         db.commit()
         
@@ -922,13 +1163,14 @@ async def toggle_push(
         
         return JSONResponse({
             "success": True,
-            "deactivated": new_stream_name.startswith('💤deactivated💤_')
+            "deactivated": new_state == "inactive",
+            "stream_name": new_stream_name
         })
         
     except Exception as e:
         db.rollback()
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-        
+       
 @app.get("/api/streams", response_class=JSONResponse)
 async def get_streams_api(current_user: User = Depends(get_current_user)):
     """API endpoint for stream data"""

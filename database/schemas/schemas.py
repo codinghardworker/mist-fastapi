@@ -2,6 +2,25 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from datetime import datetime
 
+class AppSettingsBase(BaseModel):
+    key: str
+    value: str
+    description: Optional[str] = None
+    
+class AppSettingsCreate(AppSettingsBase):
+    pass
+    
+class AppSettingsUpdate(BaseModel):
+    value: str
+    
+class AppSettingsOut(AppSettingsBase):
+    id: int
+    updated_at: datetime
+    updated_by: Optional[int]
+    
+    class Config:
+        orm_mode = True
+        
 # In your schemas.py
 class TagsUpdate(BaseModel):
     tags: List[str]

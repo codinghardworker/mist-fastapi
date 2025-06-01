@@ -1,5 +1,6 @@
 import os
 import re
+import socket
 import time
 import random
 import logging
@@ -23,15 +24,9 @@ from database.schemas import schemas
 from database.auth.hashing import Hash
 from database.auth.token import create_access_token
 from database.auth.oauth2 import get_current_user
+from endpoints.settings import get_setting_value
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
-
-# Environment variables
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 465
-SENDER_EMAIL = "techcoderhelp@gmail.com"
-SENDER_PASSWORD = "zvqe jxlp asgk hdcj"
-ADMIN_EMAIL = "admin@livefusion.com"
 
 
 # Temporary in-memory storage
@@ -57,50 +52,86 @@ class ResetPasswordRequest(BaseModel):
 
 # ============================== Helpers ==============================
 
-def send_email(recipient: str, subject: str, body: str) -> bool:
+def get_smtp_settings(db: Session):
+    """Get SMTP settings from database"""
+    return {
+        "SMTP_SERVER": get_setting_value("SMTP_SERVER", db),
+        "SMTP_PORT": get_setting_value("SMTP_PORT", db),
+        "SENDER_EMAIL": get_setting_value("SENDER_EMAIL", db),
+        "SENDER_PASSWORD": get_setting_value("SENDER_PASSWORD", db)
+    }
+
+def send_email(recipient: str, subject: str, body: str, db: Session) -> bool:
     try:
+        smtp_settings = get_smtp_settings(db)
+        
+        # Validate settings
+        if not all(smtp_settings.values()):
+            logging.error("Missing SMTP configuration")
+            return False
+
         msg = MIMEMultipart()
-        msg["From"] = SENDER_EMAIL
+        msg["From"] = smtp_settings["SENDER_EMAIL"]
         msg["To"] = recipient
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
 
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.send_message(msg)
-        return True
+        # Add timeout and better error handling
+        try:
+            with smtplib.SMTP_SSL(
+                smtp_settings["SMTP_SERVER"], 
+                int(smtp_settings["SMTP_PORT"]),
+                timeout=10  # Add timeout
+            ) as server:
+                server.login(
+                    smtp_settings["SENDER_EMAIL"], 
+                    smtp_settings["SENDER_PASSWORD"]
+                )
+                server.send_message(msg)
+            return True
+        except smtplib.SMTPException as e:
+            logging.error(f"SMTP error: {e}")
+            return False
+        except socket.gaierror as e:
+            logging.error(f"DNS resolution failed: {e}")
+            return False
+        except socket.timeout as e:
+            logging.error(f"Connection timeout: {e}")
+            return False
     except Exception as e:
         logging.error(f"Failed to send email: {e}")
         return False
 
-def send_otp_email(email: str, otp: str) -> bool:
+
+def send_otp_email(email: str, otp: str, db: Session) -> bool:
     return send_email(
         email,
         "Your OTP Verification Code",
-        f"Your verification code is: {otp}\nThis will expire in 5 minutes."
+        f"Your verification code is: {otp}\nThis will expire in 5 minutes.",
+        db
     )
 
-def send_reset_link(email: str, reset_link: str) -> bool:
+def send_reset_link(email: str, reset_link: str, db: Session) -> bool:
     return send_email(
         email,
         "Password Reset Request",
-        f"Click the link to reset your password:\n{reset_link}\n\nExpires in 1 hour."
+        f"Click the link to reset your password:\n{reset_link}\n\nExpires in 1 hour.",
+        db
     )
 
-
-# Add these new helper functions
 async def send_user_registration_email(email: str, db: Session) -> bool:
     return send_email(
         email,
         "Registration Successful",
-        "Your account has been created. An admin will assign stream access to you soon."
+        "Your account has been created. An admin will assign stream access to you soon.",
+        db
     )
 
 async def send_admin_tag_assignment_email(user_data: dict, db: Session) -> bool:
     """Send notification to admins about new user registration"""
     # Get all admin emails
     admin_emails = [user.email for user in db.query(models.User).filter(models.User.role == "admin").all()]
-    domain = os.getenv('DOMAIN', 'http://localhost:8000')
+    domain = get_setting_value("DOMAIN", db)
     assignment_url = f"{domain}/dashboard/admin"
     
     # Send to all admins
@@ -115,7 +146,8 @@ async def send_admin_tag_assignment_email(user_data: dict, db: Session) -> bool:
             Email: {user_data['email']}\n\n
             Please log in to the admin dashboard to assign stream tags to this user.\n\n
             Url: {assignment_url}
-            """
+            """,
+            db
         ))
     
     return all(results)
@@ -147,7 +179,7 @@ async def register_user(request: RegistrationRequest, db: Session = Depends(get_
         }
     }
 
-    if not send_otp_email(request.email, otp):
+    if not send_otp_email(request.email, otp, db):
         raise HTTPException(500, detail="Failed to send OTP")
 
     return {"message": "OTP sent to email"}
@@ -172,21 +204,21 @@ async def verify_otp(request: OTPRequest, db: Session = Depends(get_db)):
         role="user"  # Explicitly set role
     )
     try:
-        db.add(user)
-        db.commit()
-        
-        # Send email to user
-        await send_user_registration_email(user.email, db)
-        
-        # Send email to all admins
-        await send_admin_tag_assignment_email(user_data, db)
+            db.add(user)
+            db.commit()
             
-        return {"message": "Registration successful"}
+            # Send email to user
+            await send_user_registration_email(user.email, db)
+            
+            # Send email to all admins
+            await send_admin_tag_assignment_email(user_data, db)
+                
+            return {"message": "Registration successful"}
     except Exception as e:
-        db.rollback()
-        raise HTTPException(500, detail=f"Failed to create user: {str(e)}")
+            db.rollback()
+            raise HTTPException(500, detail=f"Failed to create user: {str(e)}")
     finally:
-        otp_storage.pop(request.email, None)
+            otp_storage.pop(request.email, None)
 
 @router.post("/login", status_code=status.HTTP_200_OK)
 def login(request: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -220,7 +252,7 @@ def forgot_password(email: EmailStr, db: Session = Depends(get_db)):
     reset_tokens[token] = {"user_id": user.id, "expiry": time.time() + 3600}
     reset_link = f"https://yourapp.com/reset-password?token={token}"
 
-    if not send_reset_link(email, reset_link):
+    if not send_reset_link(email, reset_link, db):
         raise HTTPException(500, detail="Failed to send reset link")
 
     return {"message": "Reset link sent"}

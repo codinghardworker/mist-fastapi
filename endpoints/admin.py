@@ -111,9 +111,17 @@ async def update_user_tag(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
+    # Prevent setting "No Stream is Assigned" for admin
+    if user.role == "admin" and ("No Stream is Assigned" in tag_update.tag or not tag_update.tag.strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="Admin must have access to all streams"
+        )
+    
     user.allowed_tags = tag_update.tag
     db.commit()
     return {"success": True, "new_tag": user.allowed_tags}
+
 
 @router.put("/users/{user_id}/push-limit")
 async def update_push_limit(

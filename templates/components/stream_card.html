@@ -2,11 +2,19 @@
   <div class="card stream-card">
     <div class="card-header d-flex justify-content-between align-items-center">
       <h5>{{ stream.original_name }}</h5>
-      <span class="badge bg-{% if stream.online %}success{% else %}danger{% endif %} stream-status">
-        {% if stream.online %}Online{% else %}Offline{% endif %}
-      </span>
+      <div>
+        {% if stream.has_push %}
+        <span class="badge bg-info me-2" title="Active Push">
+          <i class="bi bi-send"> Push</i>
+        </span>
+        {% endif %}
+        <span class="badge bg-{% if stream.online %}success{% else %}danger{% endif %} stream-status">
+          {% if stream.online %}Online{% else %}Offline{% endif %}
+        </span>
+      </div>
     </div>
 
+    <!-- Rest of your stream card content remains the same -->
     <div class="video-container">
       {% if stream.online %}
       <div class="mistvideo" id="{{ stream.name }}_{{ stream.embed_id }}">
@@ -32,60 +40,6 @@
           </p>
         </div>
       </div>
-
-      {% if stream.push_count > 0 %}
-      <div class="mt-2 push-status-section">
-        <div class="push-status-container">
-          {% for push in stream.push_configs %}
-          <div class="push-config {% if push.deactivated %}push-inactive{% else %}push-active{% endif %}">
-            <div class="d-flex justify-content-between">
-              <div>
-                <strong>Status:</strong>
-                <span class="badge bg-{% if push.deactivated %}danger{% else %}success{% endif %}">
-                  {% if push.deactivated %}INACTIVE{% else %}ACTIVE{% endif %}
-                </span>
-              </div>
-              <div class="text-end">
-                <div><strong>Target:</strong></div>
-                <div class="push-target">
-                  {{ push.target|truncate(20, True, '...') }}
-                </div>
-              </div>
-            </div>
-            {% if push.notes %}
-            <div class="push-notes mt-1">
-              <strong>Notes:</strong> {{ push.notes }}
-            </div>
-            {% endif %}
-            <div class="push-controls mt-2">
-              <div class="input-group input-group-sm mb-2">
-                <input
-                  type="text"
-                  class="form-control push-url-input"
-                  value="{{ push.target }}"
-                />
-                <button
-                  class="btn btn-outline-primary update-url-btn"
-                  data-push-id="{{ push.push_id }}"
-                >
-                  Update
-                </button>
-              </div>
-              <div class="text-end">
-                <button
-                  class="btn btn-sm btn-{% if push.deactivated %}success{% else %}warning{% endif %} toggle-push"
-                  data-push-id="{{ push.push_id }}"
-                  data-current-state="{% if push.deactivated %}inactive{% else %}active{% endif %}"
-                >
-                  {% if push.deactivated %}Activate{% else %}Deactivate{% endif %}
-                </button>
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </div>
-      {% endif %}
 
       <div class="d-flex justify-content-between mt-2">
         <div>

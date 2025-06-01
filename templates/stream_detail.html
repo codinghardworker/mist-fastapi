@@ -16,29 +16,93 @@
         .url-badge { cursor: pointer; }
         .url-badge:hover { opacity: 0.8; }
         
+        /* Push configuration styles from dashboard */
+        .push-config {
+            border-radius: 0.5rem;
+            font-size: 0.85rem;
+            padding: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .push-active {
+            background-color: rgba(34, 197, 94, 0.1);
+            border-left: 3px solid #22c55e;
+        }
+        
+        .push-inactive {
+            background-color: rgba(239, 68, 68, 0.1);
+            border-left: 3px solid #ef4444;
+        }
+        
+        .push-target {
+            word-break: break-all;
+            font-family: "Roboto Mono", monospace;
+            font-size: 0.75rem;
+        }
+        
+        .push-notes {
+            color: inherit;
+            opacity: 0.8;
+            word-break: break-word;
+            font-size: 0.8rem;
+        }
+        
+        .push-controls .spinner-border {
+            vertical-align: text-top;
+            margin-right: 5px;
+        }
+        
+        .push-controls .btn:disabled {
+            opacity: 0.7;
+        }
+        
+        .push-controls .input-group {
+            margin-bottom: 8px;
+        }
+        
+        .push-controls .input-group input {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem 0 0 0.375rem;
+        }
+        
+        .push-controls .input-group .btn {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0 0.375rem 0.375rem 0;
+        }
+        
+        .push-status-container {
+            max-height: 150px;
+            overflow-y: auto;
+            padding-right: 5px;
+            scrollbar-width: thin;
+        }
     </style>
 </head>
 <body>
     <div class="container-fluid py-4">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h1>
-                <a href="/dashboard" class="text-decoration-none me-3"><i class="bi bi-arrow-left"></i></a>
-                Stream: {{ stream_name }}
-            </h1>
-            <div>
-                <span class="badge rounded-pill {% if stream.is_online %}bg-success{% else %}bg-secondary{% endif %} me-2">
-                    {% if stream.is_online %}
-                        <i class="bi bi-check-circle-fill"></i> Online
-                    {% else %}
-                        <i class="bi bi-x-circle-fill"></i> Offline
-                    {% endif %}
-                </span>
-                <span class="badge rounded-pill bg-primary">
-                    <i class="bi bi-people-fill"></i> {{ stream.current_viewers }} viewers
-                </span>
-            </div>
-        </div>
-
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>
+        <a href="/dashboard" class="text-decoration-none me-3"><i class="bi bi-arrow-left"></i></a>
+        Stream: {{ stream_name }}
+    </h1>
+    <div>
+        <span class="badge rounded-pill {% if stream.is_online %}bg-success{% else %}bg-secondary{% endif %} me-2">
+            {% if stream.is_online %}
+                <i class="bi bi-check-circle-fill"></i> Online
+            {% else %}
+                <i class="bi bi-x-circle-fill"></i> Offline
+            {% endif %}
+        </span>
+        <span class="badge rounded-pill bg-primary me-2">
+            <i class="bi bi-people-fill"></i> {{ stream.current_viewers }} viewers
+        </span>
+        <button class="btn btn-sm btn-danger reset-stream-btn" data-stream-name="{{ original_name }}">
+            <i class="bi bi-arrow-repeat"></i> Reset Stream
+        </button>
+    </div>
+</div>
         <div class="row">
             <!-- Left Column -->
             <div class="col-md-8">
@@ -49,7 +113,7 @@
                     </div>
                     <div class="card-body">
                         <div class="row mb-3">
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <div class="card bg-light">
                                     <div class="card-body text-center">
                                         <h5 class="card-title">Current Viewers</h5>
@@ -57,19 +121,11 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <div class="card bg-light">
                                     <div class="card-body text-center">
                                         <h5 class="card-title">Max Viewers</h5>
                                         <p class="card-text display-6">{{ stream.max_viewers }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="card bg-light">
-                                    <div class="card-body text-center">
-                                        <h5 class="card-title">Connection Time</h5>
-                                        
                                     </div>
                                 </div>
                             </div>
@@ -78,57 +134,124 @@
                     </div>
                 </div>
 
-                {% if current_user.role == "admin" %}
-                <!-- Processes Card (Admin Only) -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <i class="bi bi-gear"></i> Processes ({{ stream.processes|length }})
-                    </div>
-                    <div class="card-body">
-                        {% for process in stream.processes %}
-                        <div class="card process-card mb-3">
-                            <div class="card-header">
-                                Process #{{ loop.index }} - {{ process.process }}
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <ul class="list-group list-group-flush">
-                                            <li class="list-group-item">
-                                                <strong>Type:</strong> {{ process.process }}
-                                            </li>
-                                            <li class="list-group-item">
-                                                <strong>Sink:</strong> {{ process.sink }}
-                                            </li>
-                                            <li class="list-group-item">
-                                                <strong>Restart Type:</strong> {{ process.restart_type }}
-                                            </li>
-                                        </ul>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <ul class="list-group list-group-flush">
-                                            <li class="list-group-item">
-                                                <strong>Debug Level:</strong> {{ process.debug }}
-                                            </li>
-                                            <li class="list-group-item">
-                                                <strong>Track Select:</strong> {{ process.track_select }}
-                                            </li>
-                                            <li class="list-group-item">
-                                                <strong>Inconsequential:</strong> {{ process.inconsequential }}
-                                            </li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
-                {% endif %}
+                  {% if current_user.role == "admin" %}
+        <!-- Metadata Card (Admin Only) -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-code-slash"></i> Raw Metadata
             </div>
+            <div class="card-body metadata-container">
+                <pre>{{ metadata }}</pre>
+            </div>
+        </div>
+        {% endif %}
+            </div>
+            
 
             <!-- Right Column -->
             <div class="col-md-4">
+                                <!-- Input Statistics Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-input-cursor"></i> Input Statistics
+                    </div>
+                    <div class="card-body">
+                        <div id="inputStatsContainer">
+                            <!-- Stats will be loaded here dynamically -->
+                            <div class="text-center py-3">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Push Configurations Card -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-send"></i> Push Configurations</span>
+                        <span class="badge bg-primary">{{ push_configs|length }}</span>
+                    </div>
+                    <div class="card-body">
+                        {% if push_configs %}
+                            <div class="push-status-section">
+                                <div class="push-status-container">
+                                    {% for push in push_configs %}
+                                    <div class="push-config {% if push.deactivated %}push-inactive{% else %}push-active{% endif %}">
+                                        <div class="d-flex justify-content-between">
+                                            <div>
+                                                <strong>Status:</strong>
+                                                <span class="badge bg-{% if push.deactivated %}danger{% else %}success{% endif %}">
+                                                    {% if push.deactivated %}INACTIVE{% else %}ACTIVE{% endif %}
+                                                </span>
+                                            </div>
+                                            <div class="text-end">
+                                                <div><strong>Target:</strong></div>
+                                                <div class="push-target">
+                                                    {{ push.target|truncate(20, True, '...') }}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% if push.notes %}
+                                        <div class="push-notes mt-1">
+                                            <strong>Notes:</strong> 
+                                            {% if current_user.role == "admin" %}
+                                                {{ push.notes }}
+
+                                            {% endif %}
+                                        </div>
+                                        {% endif %}
+                                        <div class="push-controls mt-2">
+                                            <div class="input-group input-group-sm mb-2">
+                                                <input
+                                                    type="text"
+                                                    class="form-control push-url-input"
+                                                    value="{{ push.target }}"
+                                                />
+                                                <button
+                                                    class="btn btn-outline-primary update-url-btn"
+                                                    data-push-id="{{ push.push_id }}"
+                                                >
+                                                    Update
+                                                </button>
+                                            </div>
+                                            <div class="text-end">
+                                                <button
+                                                    class="btn btn-sm btn-{% if push.deactivated %}success{% else %}warning{% endif %} toggle-push"
+                                                    data-push-id="{{ push.push_id }}"
+                                                    data-current-state="{% if push.deactivated %}inactive{% else %}active{% endif %}"
+                                                >
+                                                    {% if push.deactivated %}Activate{% else %}Deactivate{% endif %}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% else %}
+                            <p class="text-muted">No push configurations for this stream.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Active Pushes Card -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-send-arrow-up"></i> Active Pushes</span>
+        <span class="badge bg-primary" id="activePushesCount">0</span>
+    </div>
+    <div class="card-body">
+        <div id="activePushesContainer">
+            <div class="text-center py-3">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
                 <!-- Stream URLs Card -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -181,23 +304,7 @@
                     </div>
                 </div>
 
-
-                <!-- Input Statistics Card -->
-<div class="card mb-4">
-    <div class="card-header">
-        <i class="bi bi-input-cursor"></i> Input Statistics
-    </div>
-    <div class="card-body">
-        <div id="inputStatsContainer">
-            <!-- Stats will be loaded here dynamically -->
-            <div class="text-center py-3">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+                
                 <!-- Embed Code Card -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -215,69 +322,56 @@
                     </div>
                 </div>
 
-                {% if current_user.role == "admin" %}
-                <!-- Push Configurations Card (Admin Only) -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <i class="bi bi-send"></i> Push Configurations ({{ push_configs|length }})
-                    </div>
-                    <div class="card-body">
-                        {% if push_configs %}
-                            {% for push in push_configs %}
-                            <div class="card mb-3">
-                                <div class="card-header d-flex justify-content-between align-items-center">
-                                    <span>Push #{{ loop.index }}</span>
-                                    <span class="badge {% if push.deactivated %}bg-secondary{% else %}bg-success{% endif %}">
-                                        {% if push.deactivated %}Inactive{% else %}Active{% endif %}
-                                    </span>
-                                </div>
-                                <div class="card-body">
-                                    <p><strong>Target:</strong> {{ push.target }}</p>
-                                    <p><strong>Status:</strong> 
-                                        <span class="badge {% if push.deactivated %}bg-secondary{% else %}bg-success{% endif %}">
-                                            {% if push.deactivated %}Inactive{% else %}Active{% endif %}
-                                        </span>
-                                    </p>
-                                    {% if push.notes %}<p><strong>Notes:</strong> {{ push.notes }}</p>{% endif %}
-                                    <div class="d-flex justify-content-between">
-                                        <button class="btn btn-sm btn-outline-primary toggle-push-btn" 
-                                                data-push-id="{{ push.push_id }}"
-                                                data-current-state="{% if push.deactivated %}inactive{% else %}active{% endif %}">
-                                            {% if push.deactivated %}
-                                                <i class="bi bi-power"></i> Activate
-                                            {% else %}
-                                                <i class="bi bi-power"></i> Deactivate
-                                            {% endif %}
-                                        </button>
-                                        <button class="btn btn-sm btn-outline-secondary edit-push-btn" 
-                                                data-push-id="{{ push.push_id }}"
-                                                data-current-url="{{ push.target }}">
-                                            <i class="bi bi-pencil"></i> Edit URL
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <p class="text-muted">No push configurations for this stream.</p>
-                        {% endif %}
-                    </div>
-                </div>
-                {% endif %}
             </div>
         </div>
 
-        {% if current_user.role == "admin" %}
-        <!-- Metadata Card (Admin Only) -->
-        <div class="card">
-            <div class="card-header">
-                <i class="bi bi-code-slash"></i> Raw Metadata
-            </div>
-            <div class="card-body metadata-container">
-                <pre>{{ metadata }}</pre>
-            </div>
-        </div>
-        {% endif %}
+                      {% if current_user.role == "admin" %}
+                <!-- Processes Card (Admin Only) -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-gear"></i> Processes ({{ stream.processes|length }})
+                    </div>
+                    <div class="card-body">
+                        {% for process in stream.processes %}
+                        <div class="card process-card mb-3">
+                            <div class="card-header">
+                                Process #{{ loop.index }} - {{ process.process }}
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <ul class="list-group list-group-flush">
+                                            <li class="list-group-item">
+                                                <strong>Type:</strong> {{ process.process }}
+                                            </li>
+                                            <li class="list-group-item">
+                                                <strong>Sink:</strong> {{ process.sink }}
+                                            </li>
+                                            <li class="list-group-item">
+                                                <strong>Restart Type:</strong> {{ process.restart_type }}
+                                            </li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <ul class="list-group list-group-flush">
+                                            <li class="list-group-item">
+                                                <strong>Debug Level:</strong> {{ process.debug }}
+                                            </li>
+                                            <li class="list-group-item">
+                                                <strong>Track Select:</strong> {{ process.track_select }}
+                                            </li>
+                                            <li class="list-group-item">
+                                                <strong>Inconsequential:</strong> {{ process.inconsequential }}
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
     </div>
 
     <!-- Edit URL Modal -->
@@ -304,184 +398,453 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Initialize viewer chart
-        const ctx = document.getElementById('viewerChart').getContext('2d');
-        const historyData = JSON.parse('{{ history_data|safe }}');
-        
-        const timestamps = historyData.map(point => new Date(point.timestamp).toLocaleTimeString());
-        const viewers = historyData.map(point => point.viewers);
-        
-        const viewerChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: timestamps,
-                datasets: [{
-                    label: 'Viewers',
-                    data: viewers,
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    tension: 0.1,
-                    fill: true
-                }]
+<script>
+// Optimized Real-time Stream Details Script
+let updateTimer, consecutiveErrors = 0, interval = 3000, isUpdating = false;
+let viewerChart;
+
+// Initialize viewer chart
+const ctx = document.getElementById('viewerChart').getContext('2d');
+const historyData = JSON.parse('{{ history_data|safe }}');
+
+const timestamps = historyData.map(point => new Date(point.timestamp).toLocaleTimeString());
+const viewers = historyData.map(point => point.viewers);
+
+viewerChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: timestamps,
+        datasets: [{
+            label: 'Viewers',
+            data: viewers,
+            borderColor: 'rgba(75, 192, 192, 1)',
+            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+            tension: 0.1,
+            fill: true
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                display: false
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                title: {
+                    display: true,
+                    text: 'Viewers'
+                }
             },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Viewers'
-                        }
-                    },
-                    x: {
-                        title: {
-                            display: true,
-                            text: 'Time'
-                        }
-                    }
+            x: {
+                title: {
+                    display: true,
+                    text: 'Time'
                 }
             }
-        });
+        }
+    }
+});
 
-        // Copy buttons functionality
-        document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                let targetElement;
-                
-                if (this.dataset.target) {
-                    targetElement = document.querySelector(this.dataset.target);
-                } else {
-                    targetElement = this.parentElement.querySelector('.stream-url') || 
-                                  this.parentElement.querySelector('textarea');
-                }
-                
-                if (targetElement) {
-                    targetElement.select();
-                    document.execCommand('copy');
-                    
-                    // Show feedback
-                    const originalText = this.innerHTML;
-                    this.innerHTML = '<i class="bi bi-check"></i> Copied!';
-                    setTimeout(() => {
-                        this.innerHTML = originalText;
-                    }, 2000);
-                }
-            });
-        });
+// Optimized Active pushes updater with better error handling and caching
+let pushErrors = 0;
+let pushInterval = 5000; // Start with 5 seconds instead of 2
+let pushTimer = null;
+let isPushUpdating = false;
+let lastPushData = null;
+let pushDataCache = new Map();
+let pushTimerInterval = null;
 
-        // Push configuration toggle buttons
-        document.querySelectorAll('.toggle-push-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const pushId = this.dataset.pushId;
-                const currentState = this.dataset.currentState;
-                const newState = currentState === 'active' ? 'inactive' : 'active';
-                
-                fetch('/api/toggle_push', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        push_id: pushId,
-                        new_state: newState
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // Reload the page to reflect changes
-                        window.location.reload();
-                    } else {
-                        alert('Error: ' + (data.error || 'Failed to toggle push'));
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred while toggling push');
-                });
-            });
+// Separate timer management for push timers
+function startPushTimers() {
+    if (pushTimerInterval) clearInterval(pushTimerInterval);
+    
+    pushTimerInterval = setInterval(() => {
+        document.querySelectorAll('.push-timer').forEach(timer => {
+            const seconds = parseInt(timer.dataset.seconds) + 1;
+            timer.dataset.seconds = seconds;
+            
+            // Format seconds to HH:MM:SS
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            
+            timer.innerHTML = `<i class="bi bi-stopwatch me-2 fs-6"></i>${formattedTime}`;
         });
+    }, 1000);
+}
 
-        // Edit push URL functionality
-        let currentPushId = null;
-        const editPushModal = new bootstrap.Modal(document.getElementById('editPushModal'));
+function updateActivePushes() {
+    if (isPushUpdating) return;
+    isPushUpdating = true;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // Increased timeout
+    
+    fetch(`/api/stream/{{ original_name }}/active_pushes`, {
+        signal: controller.signal,
+        headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+        }
+    })
+    .then(response => {
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+    })
+    .then(data => {
+        // Reset error count only after successful response
+        pushErrors = 0;
+        pushInterval = 5000; // Reset to base interval
         
-        document.querySelectorAll('.edit-push-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                currentPushId = this.dataset.pushId;
-                document.getElementById('pushUrlInput').value = this.dataset.currentUrl;
-                editPushModal.show();
-            });
-        });
+        const container = document.getElementById('activePushesContainer');
+        const countBadge = document.getElementById('activePushesCount');
         
-        document.getElementById('savePushUrlBtn').addEventListener('click', function() {
-            const newUrl = document.getElementById('pushUrlInput').value.trim();
-            
-            if (!newUrl.match(/^(rtmp|rtmps|srt):\/\//)) {
-                alert('URL must start with rtmp://, rtmps://, or srt://');
-                return;
-            }
-            
-            fetch('/api/update_push_url', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    push_id: currentPushId,
-                    new_url: newUrl
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    editPushModal.hide();
-                    window.location.reload();
-                } else {
-                    alert('Error: ' + (data.error || 'Failed to update URL'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('An error occurred while updating URL');
-            });
-        });
-
-        // Function to update input stats
-function updateInputStats() {
-    fetch(`/api/stream/{{ original_name }}/input_stats`)
-        .then(response => response.json())
-        .then(data => {
-            const container = document.getElementById('inputStatsContainer');
-            
-            if (data.input_stats.length === 0) {
-                container.innerHTML = `
-                    <div class="alert alert-info">
-                        No active input connections for this stream.
+        // Check if data actually changed to avoid unnecessary DOM updates
+        const dataKey = JSON.stringify(data);
+        if (dataKey === lastPushData) {
+            return; // No changes, skip DOM update
+        }
+        lastPushData = dataKey;
+        
+        if (!data.pushes || data.pushes.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-3 text-muted">
+                    <i class="bi bi-send-slash"></i> No active pushes running
+                </div>
+            `;
+            countBadge.textContent = '0';
+            clearInterval(pushTimerInterval);
+            return;
+        }
+        
+        countBadge.textContent = data.pushes.length;
+        
+        let html = '';
+        data.pushes.forEach((push, index) => {
+            html += `
+                <div class="card mb-3 border-primary active-push-card" style="transition: all 0.3s ease;">
+                    <div class="card-body p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div class="d-flex align-items-center">
+                                <div class="me-3">
+                                    <span class="badge bg-primary rounded-pill push-pulse" style="width: 12px; height: 12px; padding: 0;"></span>
+                                </div>
+                                <div>
+                                    <h5 class="mb-1 fw-bold text-dark">Push #${index + 1}</h5>
+                                    <p class="mb-0 text-muted fs-6">PID: ${push.pid}</p>
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                <div class="badge bg-info px-4 py-3 push-timer" 
+                                     data-seconds="${push.active_seconds}"
+                                     style="font-family: monospace; font-size: 1.1rem; font-weight: 600; letter-spacing: 1px;">
+                                    <i class="bi bi-stopwatch me-2 fs-6"></i>${push.formatted_time}
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                `;
-                return;
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html + `
+            <style>
+                .push-pulse {
+                    animation: pushPulse 2s ease-in-out infinite;
+                }
+                @keyframes pushPulse {
+                    0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.4); }
+                    50% { opacity: 0.8; transform: scale(1.1); box-shadow: 0 0 0 8px rgba(13, 110, 253, 0); }
+                }
+                .active-push-card:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
+                }
+            </style>
+        `;
+        
+        // Start or restart timer management
+        startPushTimers();
+    })
+    .catch(error => {
+        clearTimeout(timeoutId);
+        pushErrors++;
+        
+        const container = document.getElementById('activePushesContainer');
+        
+        // More conservative error handling
+        if (pushErrors === 1) {
+            // Don't show error immediately, just increase interval
+            pushInterval = 8000;
+        } else if (pushErrors <= 3) {
+            container.innerHTML = '<div class="text-sm text-warning text-center py-3"><i class="bi bi-wifi"></i> Checking connection...</div>';
+            pushInterval = 10000;
+        } else if (pushErrors <= 6) {
+            container.innerHTML = '<div class="text-sm text-info text-center py-3"><i class="bi bi-arrow-repeat"></i> Reconnecting...</div>';
+            pushInterval = 15000;
+        } else {
+            container.innerHTML = '<div class="text-sm text-secondary text-center py-3"><i class="bi bi-pause-circle"></i> Monitoring paused</div>';
+            pushInterval = 30000; // Much longer interval for persistent failures
+        }
+        
+        console.warn(`Push update failed (attempt ${pushErrors}):`, error.message);
+    })
+    .finally(() => {
+        isPushUpdating = false;
+        clearTimeout(pushTimer);
+        pushTimer = setTimeout(updateActivePushes, pushInterval);
+    });
+}
+
+// Real-time update function
+async function updateStreamData() {
+    if (isUpdating) return;
+    isUpdating = true;
+    
+    try {
+        const response = await fetch(`/api/stream/{{ original_name }}/details`, {
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        
+        consecutiveErrors = 0;
+        interval = 3000;
+        
+        // Update status badge
+        const statusBadge = document.querySelector('.stream-status-badge');
+        if (statusBadge) {
+            const isOnline = data.is_online;
+            statusBadge.className = `badge rounded-pill stream-status-badge me-2 ${isOnline ? 'bg-success' : 'bg-secondary'}`;
+            statusBadge.innerHTML = isOnline ? 
+                '<i class="bi bi-check-circle-fill"></i> Online' : 
+                '<i class="bi bi-x-circle-fill"></i> Offline';
+        }
+        
+        // Update viewer count in header
+        const viewerCount = document.querySelector('.viewer-count');
+        if (viewerCount && viewerCount.textContent !== String(data.current_viewers)) {
+            viewerCount.textContent = data.current_viewers;
+            viewerCount.style.transform = 'scale(1.2)';
+            viewerCount.style.color = '#fff';
+            setTimeout(() => {
+                viewerCount.style.transform = 'scale(1)';
+                viewerCount.style.color = '';
+            }, 300);
+        }
+        
+        // Update current viewers card
+        const currentViewersDisplay = document.querySelector('.current-viewers-display');
+        if (currentViewersDisplay && currentViewersDisplay.textContent !== String(data.current_viewers)) {
+            currentViewersDisplay.style.transform = 'scale(1.1)';
+            currentViewersDisplay.style.color = '#0d6efd';
+            currentViewersDisplay.textContent = data.current_viewers;
+            setTimeout(() => {
+                currentViewersDisplay.style.transform = 'scale(1)';
+                currentViewersDisplay.style.color = '';
+            }, 300);
+        }
+        
+        // Update max viewers card
+        const maxViewersDisplay = document.querySelector('.max-viewers-display');
+        if (maxViewersDisplay && data.max_viewers && maxViewersDisplay.textContent !== String(data.max_viewers)) {
+            maxViewersDisplay.style.transform = 'scale(1.1)';
+            maxViewersDisplay.style.color = '#198754';
+            maxViewersDisplay.textContent = data.max_viewers;
+            setTimeout(() => {
+                maxViewersDisplay.style.transform = 'scale(1)';
+                maxViewersDisplay.style.color = '';
+            }, 300);
+        }
+        
+        // Update chart
+        if (viewerChart && data.current_viewers !== undefined) {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+            
+            viewerChart.data.labels.push(timeString);
+            viewerChart.data.datasets[0].data.push(data.current_viewers);
+            
+            // Keep only last 20 points
+            if (viewerChart.data.labels.length > 20) {
+                viewerChart.data.labels.shift();
+                viewerChart.data.datasets[0].data.shift();
+            }
+            viewerChart.update('none');
+        }
+        
+        // Update last update time
+        const lastUpdateTime = document.getElementById('last-update-time');
+        if (lastUpdateTime) {
+            lastUpdateTime.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+        }
+        
+    } catch (error) {
+        consecutiveErrors++;
+        interval = Math.min(3000 * consecutiveErrors, 15000);
+        console.warn('Stream data update failed:', error.message);
+        
+        // Show error state
+        const lastUpdateTime = document.getElementById('last-update-time');
+        if (lastUpdateTime && consecutiveErrors > 2) {
+            lastUpdateTime.innerHTML = `<span class="text-warning">Connection issues - retrying...</span>`;
+        }
+        
+    } finally {
+        isUpdating = false;
+        clearTimeout(updateTimer);
+        updateTimer = setTimeout(updateStreamData, interval);
+    }
+}
+
+// Copy buttons functionality
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        let targetElement;
+        
+        if (this.dataset.target) {
+            targetElement = document.querySelector(this.dataset.target);
+        } else {
+            targetElement = this.parentElement.querySelector('.stream-url') || 
+                          this.parentElement.querySelector('textarea');
+        }
+        
+        if (targetElement) {
+            targetElement.select();
+            document.execCommand('copy');
+            
+            // Show feedback
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="bi bi-check"></i> Copied!';
+            setTimeout(() => {
+                this.innerHTML = originalText;
+            }, 2000);
+        }
+    });
+});
+
+// Reset Stream Functionality
+document.querySelector('.reset-stream-btn').addEventListener('click', async function() {
+    const button = this;
+    const streamName = button.dataset.streamName;
+    
+    if (!confirm(`Are you sure you want to reset the stream "${streamName}"? This will temporarily interrupt the stream.`)) {
+        return;
+    }
+    
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Resetting...';
+    
+    try {
+        await fetch('/api/reset_stream', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ stream_name: streamName })
+        });
+        
+        button.innerHTML = '<i class="bi bi-check-circle"></i> Done';
+        setTimeout(() => {
+            window.location.reload();
+        }, 1000);
+        
+    } catch (error) {
+        setTimeout(() => {
+            button.innerHTML = '<i class="bi bi-arrow-repeat"></i> Reset Stream';
+            button.disabled = false;
+        }, 2000);
+    }
+});
+
+// Manual refresh button
+document.getElementById('manual-refresh-btn')?.addEventListener('click', function() {
+    const btn = this;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    btn.disabled = true;
+    
+    consecutiveErrors = 0;
+    interval = 3000;
+    
+    updateStreamData().finally(() => {
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+        btn.disabled = false;
+    });
+});
+
+// Optimized input stats updater with better stability
+let inputErrors = 0;
+let inputInterval = 3000; // Increased base interval
+let inputTimer = null;
+let isInputUpdating = false;
+let lastInputData = null;
+
+function updateInputStats() {
+    if (isInputUpdating) return;
+    isInputUpdating = true;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // Increased timeout
+    
+    fetch(`/api/stream/{{ original_name }}/input_stats`, {
+        signal: controller.signal,
+        headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+        }
+    })
+    .then(response => {
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        inputErrors = 0;
+        inputInterval = 3000; // Reset to base
+        
+        const container = document.getElementById('inputStatsContainer');
+        
+        // Check if data changed
+        const dataKey = JSON.stringify(data);
+        if (dataKey === lastInputData) {
+            return; // No changes, skip DOM update
+        }
+        lastInputData = dataKey;
+        
+        if (!data.input_stats || data.input_stats.length === 0) {
+            let message = '';
+            if (inputErrors === 0) {
+                message = '<div class="text-sm text-muted text-center py-3"><i class="bi bi-search"></i> No active inputs detected</div>';
+            } else {
+                message = '<div class="text-sm text-secondary text-center py-3"><i class="bi bi-pause-circle"></i> Monitoring for inputs</div>';
             }
             
+            container.innerHTML = message;
+            inputInterval = 8000; // Longer interval when no inputs
+            return;
+        }
+        
+        {% if current_user.role == "admin" %}
             let html = '';
             data.input_stats.forEach((stats, index) => {
-                // Format connection time
                 const hours = Math.floor(stats.connected_time / 3600);
                 const minutes = Math.floor((stats.connected_time % 3600) / 60);
                 const seconds = stats.connected_time % 60;
                 const connTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                 
                 html += `
-                    <div class="card mb-3">
-                        <div class="card-header">
-                            Input #${index + 1}
+                    <div class="card mb-3 border-success">
+                        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-broadcast"></i> Input #${index + 1}</span>
+                            <span class="badge bg-success">● LIVE</span>
                         </div>
                         <div class="card-body">
                             <div class="row">
@@ -489,9 +852,10 @@ function updateInputStats() {
                                     <p><strong>Host:</strong> ${stats.host}</p>
                                     <p><strong>Protocol:</strong> ${stats.protocol}</p>
                                     <p><strong>Connected:</strong> ${connTime}</p>
+                                    <p><strong>Connection Time:</strong> ${stats.connected_time} seconds</p>
                                 </div>
                                 <div class="col-md-6">
-                                    <p><strong>Data Downloaded:</strong> <br/>${stats.data_downloaded_gb.toFixed(2)} GB, ${stats.data_downloaded_mb.toFixed(2)} MB </p>
+                                    <p><strong>Data Downloaded:</strong><br/>${stats.data_downloaded_gb.toFixed(2)} GB, ${stats.data_downloaded_mb.toFixed(2)} MB</p>
                                     <p><strong>Current Bitrate:</strong> ${stats.current_bitrate_mbps.toFixed(2)} Mbps</p>
                                 </div>
                             </div>
@@ -499,17 +863,253 @@ function updateInputStats() {
                     </div>
                 `;
             });
-            
             container.innerHTML = html;
-        })
-        .catch(error => {
-            console.error('Error fetching input stats:', error);
-        });
+        {% else %}
+            // Show only the first input for non-admin users
+            const stats = data.input_stats[0]; // Get only the first input
+            const hours = Math.floor(stats.connected_time / 3600);
+            const minutes = Math.floor((stats.connected_time % 3600) / 60);
+            const seconds = stats.connected_time % 60;
+            const connTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            const html = `
+                <div class="card mb-3 border-0 shadow-sm active-input" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); transition: all 0.3s ease;">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div class="d-flex align-items-center">
+                                <div class="me-3">
+                                    <span class="badge bg-success rounded-pill live-pulse" style="width: 12px; height: 12px; padding: 0;"></span>
+                                </div>
+                                <div>
+                                    <h5 class="mb-1 fw-bold text-dark">Uptime</h5>
+                                    <p class="mb-0 text-muted fs-6">Input Stream</p>
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                <div class="badge bg-primary px-4 py-3" style="font-family: monospace; font-size: 1.1rem; font-weight: 600; letter-spacing: 1px;">
+                                    <i class="bi bi-stopwatch me-2 fs-6"></i>${connTime}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html + `
+                <style>
+                    .live-pulse {
+                        animation: livePulse 2s ease-in-out infinite;
+                    }
+                    @keyframes livePulse {
+                        0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 135, 84, 0.4); }
+                        50% { opacity: 0.8; transform: scale(1.1); box-shadow: 0 0 0 8px rgba(25, 135, 84, 0); }
+                    }
+                    .active-input:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
+                    }
+                </style>
+            `;
+        {% endif %}
+    })
+    .catch(error => {
+        clearTimeout(timeoutId);
+        inputErrors++;
+        
+        const container = document.getElementById('inputStatsContainer');
+        
+        // More graceful error handling
+        if (inputErrors <= 2) {
+            inputInterval = 5000;
+        } else if (inputErrors <= 5) {
+            container.innerHTML = '<div class="text-sm text-info text-center py-3"><i class="bi bi-wifi"></i> Checking connection...</div>';
+            inputInterval = 10000;
+        } else {
+            container.innerHTML = '<div class="text-sm text-secondary text-center py-3"><i class="bi bi-pause-circle"></i> Monitoring paused</div>';
+            inputInterval = 20000;
+        }
+        
+        console.warn(`Input stats update failed (attempt ${inputErrors}):`, error.message);
+    })
+    .finally(() => {
+        isInputUpdating = false;
+        clearTimeout(inputTimer);
+        inputTimer = setTimeout(updateInputStats, inputInterval);
+    });
 }
 
-// Update immediately and then every second
-updateInputStats();
-setInterval(updateInputStats, 1000);
-    </script>
+
+// Push configuration toggle buttons
+document.querySelectorAll('.toggle-push').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const pushId = this.dataset.pushId;
+        const currentState = this.dataset.currentState;
+        const newState = currentState === 'active' ? 'inactive' : 'active';
+        
+        this.disabled = true;
+        this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        
+        fetch('/api/toggle_push', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                push_id: pushId,
+                new_state: newState
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const pushConfig = this.closest('.push-config');
+
+                if (newState === 'inactive') {
+                    pushConfig.classList.remove('push-active');
+                    pushConfig.classList.add('push-inactive');
+                    this.classList.remove('btn-warning');
+                    this.classList.add('btn-success');
+                    this.textContent = 'Activate';
+                    pushConfig.querySelector('.badge').className = 'badge bg-danger';
+                    pushConfig.querySelector('.badge').textContent = 'INACTIVE';
+                } else {
+                    pushConfig.classList.remove('push-inactive');
+                    pushConfig.classList.add('push-active');
+                    this.classList.remove('btn-success');
+                    this.classList.add('btn-warning');
+                    this.textContent = 'Deactivate';
+                    pushConfig.querySelector('.badge').className = 'badge bg-success';
+                    pushConfig.querySelector('.badge').textContent = 'ACTIVE';
+                }
+
+                this.dataset.currentState = newState;
+            } else {
+                alert('Error: ' + (data.error || 'Operation failed'));
+            }
+        })
+        .catch(error => {
+            console.error('Error toggling push:', error);
+        })
+        .finally(() => {
+            this.disabled = false;
+            this.innerHTML = newState === 'active' ? 'Deactivate' : 'Activate';
+        });
+    });
+});
+
+// Update push URL
+document.querySelectorAll('.update-url-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const button = this;
+        const input = button.closest('.input-group').querySelector('.push-url-input');
+        const pushId = button.dataset.pushId;
+        const newUrl = input.value.trim();
+
+        if (!newUrl) {
+            alert('Please enter a valid URL');
+            return;
+        }
+
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        fetch('/api/update_push_url', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+                push_id: pushId, 
+                new_url: newUrl 
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                button.innerHTML = '<i class="bi bi-check"></i>';
+                setTimeout(() => {
+                    button.innerHTML = 'Update';
+                    button.disabled = false;
+                }, 1000);
+            } else {
+                alert('Error: ' + (data.error || 'Update failed'));
+                button.innerHTML = 'Update';
+                button.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error updating URL:', error);
+            button.innerHTML = 'Update';
+            button.disabled = false;
+        });
+    });
+});
+
+// Page visibility handling
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        clearTimeout(updateTimer);
+        clearTimeout(inputTimer);
+        clearTimeout(pushTimer);
+        clearInterval(pushTimerInterval);
+    } else {
+        // Reset error counts when page becomes visible
+        consecutiveErrors = 0;
+        inputErrors = 0;
+        pushErrors = 0;
+        interval = 3000;
+        inputInterval = 3000;
+        pushInterval = 5000;
+        
+        updateStreamData();
+        updateInputStats();
+        updateActivePushes();
+    }
+});
+
+// Network status handlers
+window.addEventListener('online', function() {
+    consecutiveErrors = 0;
+    inputErrors = 0;
+    pushErrors = 0;
+    interval = 3000;
+    inputInterval = 3000;
+    pushInterval = 5000;
+    updateStreamData();
+    updateInputStats();
+    updateActivePushes();
+});
+
+window.addEventListener('offline', function() {
+    clearTimeout(updateTimer);
+    clearTimeout(inputTimer);
+    clearTimeout(pushTimer);
+    clearInterval(pushTimerInterval);
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    clearTimeout(updateTimer);
+    clearTimeout(inputTimer);
+    clearTimeout(pushTimer);
+    clearInterval(pushTimerInterval);
+});
+
+// Start all updates with staggered timing to reduce server load
+setTimeout(() => {
+    updateStreamData();
+    console.log('Stream data updates started');
+}, 100);
+
+setTimeout(() => {
+    updateInputStats();
+    console.log('Input stats updates started');
+}, 1000);
+
+setTimeout(() => {
+    updateActivePushes();
+    console.log('Active push updates started');
+}, 2000);
+</script>
 </body>
 </html>
