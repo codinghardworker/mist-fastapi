@@ -639,7 +639,7 @@ async def settings_page(
         )
     
     return templates.TemplateResponse(
-        "settings.html",
+        "admin_settings.html",
         {
             "request": request,
             "current_user": current_user
