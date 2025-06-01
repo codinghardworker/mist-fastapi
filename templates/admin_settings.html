@@ -356,7 +356,7 @@ async function fetchWithAuth(url, options = {}) {
         async function loadSettings() {
             try {
                 showLoading(true);
-                const response = await fetchWithAuth('https://mist-fastapi-production.up.railway.app/settings');
+                const response = await fetchWithAuth('/settings');
                 if (response && response.ok) {
                     settings = await response.json();
                     populateSettingsForm();
@@ -396,7 +396,7 @@ async function fetchWithAuth(url, options = {}) {
                 `Are you sure you want to update ${key}?`,
                 async () => {
                     try {
-                        const response = await fetchWithAuth(`https://mist-fastapi-production.up.railway.app/settings/${key}`, {
+                        const response = await fetchWithAuth(`/settings/${key}`, {
                             method: 'PUT',
                             body: JSON.stringify({ value: newValue })
                         });
