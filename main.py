@@ -23,6 +23,7 @@ from database.db.db_connection import engine, Base, get_db
 from endpoints import admin, auth, settings
 from endpoints.settings import get_setting_value, initialize_settings_on_startup
 import time
+from fastapi.middleware.cors import CORSMiddleware
 
 
 # Initialize FastAPI
@@ -32,6 +33,13 @@ app = FastAPI(
     version="1.0.0"
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or your specific domains
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Display name mappings (outside any class/function)
 STREAM_DISPLAY_NAMES = {
