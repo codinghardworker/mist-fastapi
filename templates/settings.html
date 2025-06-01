@@ -303,34 +303,34 @@
             document.getElementById('mobileMenuOverlay').classList.add('hidden');
         }
 
-        // API functions
-        function getAuthToken() {
-            return localStorage.getItem('token');
+       // HTTPS-compatible fetch function
+async function fetchWithAuth(url, options = {}) {
+    const token = getAuthToken();
+    if (!token) {
+        window.location.href = '/login';
+        return null;
+    }
+
+    // Ensure URL uses the same protocol as the current page
+    const baseUrl = window.location.origin;
+    const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
+
+    const response = await fetch(fullUrl, {
+        ...options,
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            ...options.headers
         }
+    });
 
-        async function fetchWithAuth(url, options = {}) {
-            const token = getAuthToken();
-            if (!token) {
-                window.location.href = '/login';
-                return null;
-            }
+    if (response.status === 401) {
+        window.location.href = '/login';
+        return null;
+    }
 
-            const response = await fetch(url, {
-                ...options,
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                }
-            });
-
-            if (response.status === 401) {
-                window.location.href = '/login';
-                return null;
-            }
-
-            return response;
-        }
+    return response;
+}
 
         async function logout() {
             try {
