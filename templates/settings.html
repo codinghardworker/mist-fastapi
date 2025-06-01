@@ -303,7 +303,12 @@
             document.getElementById('mobileMenuOverlay').classList.add('hidden');
         }
 
-       // HTTPS-compatible fetch function
+        // API functions
+        function getAuthToken() {
+            return localStorage.getItem('token');
+        }
+
+// HTTPS-compatible fetch function
 async function fetchWithAuth(url, options = {}) {
     const token = getAuthToken();
     if (!token) {
