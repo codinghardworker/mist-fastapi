@@ -9,7 +9,7 @@ from database.models.models import AppSettings, User
 from database.schemas import schemas
 from database.auth.oauth2 import get_current_user
 
-router = APIRouter(prefix="/settings", tags=["Settings"])
+router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
 # Default settings configuration - now only contains keys and descriptions, values come from env
 DEFAULT_SETTINGS = [
