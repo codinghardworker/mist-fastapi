@@ -63,7 +63,7 @@
                                           initPlayer();
                                       } else {
                                           var script = document.createElement("script");
-                                          script.src = "https://tir3.com/player.js";
+                                          script.src = "http://tir3.com/player.js";
                                           script.onload = initPlayer;
                                           document.head.appendChild(script);
                                       }

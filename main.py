@@ -79,8 +79,8 @@ class StreamMonitor:
         }
         
         # Required settings
-        self.base_url = f"https://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api"
-        self.api2_url = f"https://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api2"
+        self.base_url = f"http://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api"
+        self.api2_url = f"http://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api2"
         self.username = self.settings['MIST_USERNAME']
         self.password = self.settings['MIST_PASSWORD']
         
@@ -102,8 +102,8 @@ class StreamMonitor:
             if current_settings != self.settings:
                 print("Settings changed - reinitializing connection")
                 self.settings = current_settings
-                self.base_url = f"https://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api"
-                self.api2_url = f"https://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api2"
+                self.base_url = f"http://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api"
+                self.api2_url = f"http://{self.settings['MIST_HOST']}:{self.settings['MIST_PORT']}/api2"
                 self.username = self.settings['MIST_USERNAME']
                 self.password = self.settings['MIST_PASSWORD']
                 
@@ -468,7 +468,7 @@ class StreamMonitor:
 
     def _extract_stream_urls(self, stream_name: str) -> Dict:
         """Extract various stream URLs for a given stream"""
-        base_url = "https://tir3.com"
+        base_url = "http://tir3.com"
         return {
             "html_page": f"{base_url}/{stream_name}.html",
             "embed_code": self._generate_embed_code(stream_name),
@@ -484,7 +484,7 @@ class StreamMonitor:
                     f"https://{base_url}/hls/{stream_name}/index.m3u8"
                 ],
                 "rtmp": f"rtmp://{base_url}/play/{stream_name}",
-                "webrtc": f"https://{base_url}/webrtc/{stream_name}"
+                "webrtc": f"http://{base_url}/webrtc/{stream_name}"
             }
         }
 
