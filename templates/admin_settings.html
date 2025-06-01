@@ -358,23 +358,46 @@ async function fetchWithAuth(url, options = {}) {
         }
 
         // Settings functions
-        async function loadSettings() {
-            try {
-                showLoading(true);
-                const response = await fetchWithAuth('/settings');
-                if (response && response.ok) {
-                    settings = await response.json();
-                    populateSettingsForm();
-                } else {
-                    throw new Error('Failed to load settings');
-                }
-            } catch (error) {
-                console.error('Error loading settings:', error);
-                showToast('Failed to load settings', 'error');
-            } finally {
-                showLoading(false);
+  async function fetchWithAuth(url, options = {}) {
+    const token = getAuthToken();
+    if (!token) {
+        window.location.href = '/login';
+        return null;
+    }
+
+    // Ensure URL uses HTTPS if the current page is HTTPS
+    let fullUrl;
+    if (url.startsWith('http')) {
+        // If URL is already absolute, force HTTPS
+        fullUrl = url.replace(/^http:/, 'https:');
+    } else {
+        // For relative URLs, use current origin (which is HTTPS)
+        fullUrl = window.location.origin + url;
+    }
+
+    try {
+        const response = await fetch(fullUrl, {
+            ...options,
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...options.headers
             }
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return null;
         }
+
+        return response;
+    } catch (error) {
+        console.error('Fetch error:', error);
+        showToast('Network error occurred', 'error');
+        throw error;
+    }
+}
+
 
         function populateSettingsForm() {
             settings.forEach(setting => {
