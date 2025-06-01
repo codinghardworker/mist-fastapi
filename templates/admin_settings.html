@@ -308,57 +308,7 @@
             return localStorage.getItem('token');
         }
 
-// HTTPS-compatible fetch function
 async function fetchWithAuth(url, options = {}) {
-    const token = getAuthToken();
-    if (!token) {
-        window.location.href = '/login';
-        return null;
-    }
-
-    // Ensure URL uses the same protocol as the current page
-    const baseUrl = window.location.origin;
-    const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
-
-    const response = await fetch(fullUrl, {
-        ...options,
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            ...options.headers
-        }
-    });
-
-    if (response.status === 401) {
-        window.location.href = '/login';
-        return null;
-    }
-
-    return response;
-}
-
-        async function logout() {
-            try {
-                const token = getAuthToken();
-                if (token) {
-                    await fetch('/auth/logout', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                }
-                localStorage.removeItem('token');
-                window.location.href = '/login';
-            } catch (error) {
-                console.error('Logout error:', error);
-                window.location.href = '/login';
-            }
-        }
-
-        // Settings functions
-  async function fetchWithAuth(url, options = {}) {
     const token = getAuthToken();
     if (!token) {
         window.location.href = '/login';
@@ -397,6 +347,45 @@ async function fetchWithAuth(url, options = {}) {
         throw error;
     }
 }
+
+        async function logout() {
+            try {
+                const token = getAuthToken();
+                if (token) {
+                    await fetch('/auth/logout', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                }
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            } catch (error) {
+                console.error('Logout error:', error);
+                window.location.href = '/login';
+            }
+        }
+
+        // Settings functions
+        async function loadSettings() {
+            try {
+                showLoading(true);
+                const response = await fetchWithAuth('/settings');
+                if (response && response.ok) {
+                    settings = await response.json();
+                    populateSettingsForm();
+                } else {
+                    throw new Error('Failed to load settings');
+                }
+            } catch (error) {
+                console.error('Error loading settings:', error);
+                showToast('Failed to load settings', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
 
         function populateSettingsForm() {
             settings.forEach(setting => {
