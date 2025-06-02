@@ -34,13 +34,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your specific domains
+    allow_origins=["*"],  # Or your specific domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Display name mappings (outside any class/function)
@@ -1373,20 +1374,16 @@ async def get_pushes_api():
         "timestamp": datetime.now().isoformat()
     }
 
-# Add WebSocket endpoints
+# Add WebSocket endpoints with explicit WSS support
 @app.websocket("/ws/input_stats/{stream_name}")
 async def websocket_input_stats(websocket: WebSocket, stream_name: str):
     await manager.connect(websocket, "input_stats")
     try:
         while True:
-            try:
-                # Get input stats
-                stats = await monitor.get_stream_input_stats(stream_name)
-                await websocket.send_json({"input_stats": stats})
-                await asyncio.sleep(1)  # Update every second
-            except Exception as e:
-                print(f"Error in input stats websocket loop: {e}")
-                await asyncio.sleep(1)  # Wait before retrying
+            # Get input stats
+            stats = await monitor.get_stream_input_stats(stream_name)
+            await websocket.send_json({"input_stats": stats})
+            await asyncio.sleep(1)  # Update every second
     except WebSocketDisconnect:
         manager.disconnect(websocket, "input_stats")
     except Exception as e:
@@ -1398,40 +1395,36 @@ async def websocket_active_pushes(websocket: WebSocket, stream_name: str):
     await manager.connect(websocket, "active_pushes")
     try:
         while True:
-            try:
-                # Get active pushes
-                resp = monitor.session.get(
-                    monitor.base_url, 
-                    params={"command": json.dumps({"push_list": True})},
-                    timeout=5
-                )
-                active_pushes = resp.json().get("push_list", []) or []
-                
-                # Filter and format pushes for this stream
-                result = []
-                for push in active_pushes:
-                    if not isinstance(push, (list, dict)) or len(push) < 6:
-                        continue
-                        
-                    if push[1] == stream_name:
-                        stats = push[5] if len(push) > 5 else {}
-                        active_seconds = stats.get("active_seconds", 0)
-                        
-                        hours, remainder = divmod(active_seconds, 3600)
-                        minutes, seconds = divmod(remainder, 60)
-                        formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                        
-                        result.append({
-                            "pid": push[0],
-                            "active_seconds": active_seconds,
-                            "formatted_time": formatted_time
-                        })
-                
-                await websocket.send_json({"pushes": result})
-                await asyncio.sleep(1)  # Update every second
-            except Exception as e:
-                print(f"Error in active pushes websocket loop: {e}")
-                await asyncio.sleep(1)  # Wait before retrying
+            # Get active pushes
+            resp = monitor.session.get(
+                monitor.base_url, 
+                params={"command": json.dumps({"push_list": True})},
+                timeout=5
+            )
+            active_pushes = resp.json().get("push_list", []) or []
+            
+            # Filter and format pushes for this stream
+            result = []
+            for push in active_pushes:
+                if not isinstance(push, (list, dict)) or len(push) < 6:
+                    continue
+                    
+                if push[1] == stream_name:
+                    stats = push[5] if len(push) > 5 else {}
+                    active_seconds = stats.get("active_seconds", 0)
+                    
+                    hours, remainder = divmod(active_seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    
+                    result.append({
+                        "pid": push[0],
+                        "active_seconds": active_seconds,
+                        "formatted_time": formatted_time
+                    })
+            
+            await websocket.send_json({"pushes": result})
+            await asyncio.sleep(1)  # Update every second
     except WebSocketDisconnect:
         manager.disconnect(websocket, "active_pushes")
     except Exception as e:
@@ -1443,20 +1436,16 @@ async def websocket_stream_data(websocket: WebSocket, stream_name: str):
     await manager.connect(websocket, "stream_data")
     try:
         while True:
-            try:
-                # Get stream data
-                stream = monitor.stream_data.get(stream_name)
-                if stream:
-                    await websocket.send_json({
-                        "current_viewers": stream.get("current_viewers", 0),
-                        "max_viewers": stream.get("max_viewers", 0),
-                        "is_online": stream.get("is_online", False),
-                        "last_updated": stream.get("last_updated", "")
-                    })
-                await asyncio.sleep(1)  # Update every second
-            except Exception as e:
-                print(f"Error in stream data websocket loop: {e}")
-                await asyncio.sleep(1)  # Wait before retrying
+            # Get stream data
+            stream = monitor.stream_data.get(stream_name)
+            if stream:
+                await websocket.send_json({
+                    "current_viewers": stream.get("current_viewers", 0),
+                    "max_viewers": stream.get("max_viewers", 0),
+                    "is_online": stream.get("is_online", False),
+                    "last_updated": stream.get("last_updated", "")
+                })
+            await asyncio.sleep(1)  # Update every second
     except WebSocketDisconnect:
         manager.disconnect(websocket, "stream_data")
     except Exception as e:

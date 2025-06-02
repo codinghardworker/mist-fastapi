@@ -487,11 +487,6 @@ function connectWebSocket(type) {
     ws.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
-            if (data.error) {
-                console.error(`${type} WebSocket error:`, data.error);
-                showConnectionError(type);
-                return;
-            }
             requestAnimationFrame(() => {
                 switch(type) {
                     case 'input_stats':
@@ -517,10 +512,8 @@ function connectWebSocket(type) {
         if (event.code !== 1000) {
             if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
                 wsReconnectAttempts++;
-                const delay = RECONNECT_DELAY * Math.pow(2, wsReconnectAttempts - 1); // Exponential backoff
-                console.log(`Attempting to reconnect ${type} in ${delay}ms...`);
-                setTimeout(() => connectWebSocket(type), delay);
-            } else {
+                setTimeout(() => connectWebSocket(type), RECONNECT_DELAY * wsReconnectAttempts);
+        } else {
                 showConnectionError(type);
             }
         }
@@ -528,7 +521,7 @@ function connectWebSocket(type) {
 
     ws.onerror = (error) => {
         console.error(`${type} WebSocket error:`, error);
-        // Don't show error immediately, let onclose handle reconnection
+        showConnectionError(type);
     };
 }
 
