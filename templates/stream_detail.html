@@ -16,6 +16,32 @@
         .url-badge { cursor: pointer; }
         .url-badge:hover { opacity: 0.8; }
         
+        /* Toast styles */
+        .toast {
+            transition: opacity 0.15s ease;
+        }
+        
+        .toast.show {
+            opacity: 1;
+        }
+        
+        .toast:not(.show) {
+            opacity: 0;
+            display: block;
+        }
+        
+        #toastContainer {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1050;
+            min-width: 300px;
+        }
+        
+        .toast-body {
+            padding: 0.75rem;
+        }
+        
         /* Push configuration styles from dashboard */
         .push-config {
             border-radius: 0.5rem;
@@ -81,6 +107,9 @@
     </style>
 </head>
 <body>
+    <!-- Add toast container -->
+    <div id="toastContainer"></div>
+    
     <div class="container-fluid py-4">
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1>
@@ -235,22 +264,59 @@
                     </div>
                 </div>
 
-                <!-- Active Pushes Card -->
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-send-arrow-up"></i> Active Pushes</span>
-        <span class="badge bg-primary" id="activePushesCount">0</span>
-    </div>
-    <div class="card-body">
-        <div id="activePushesContainer">
-            <div class="text-center py-3">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
+                <!-- Automatic Push Configuration Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-gear"></i> Automatic Push Configuration
+                    </div>
+                    <div class="card-body">
+                        {% if push_configs %}
+                            <div class="alert alert-info">
+                                This stream has {{ push_configs|length }} automatic push configuration(s)
+                            </div>
+                            <button id="removeAutoPushBtn" class="btn btn-danger">
+                                <i class="bi bi-trash"></i> Remove Automatic Push
+                            </button>
+                            
+                            {% if push_configs|length > 1 %}
+                                <div class="mt-3">
+                                    <label class="form-label">Select Push to Remove:</label>
+                                    <select class="form-select" id="pushToRemoveSelect">
+                                        {% for push in push_configs %}
+                                            <option value="{{ push.push_id }}">{{ push.target|truncate(30, True, '...') }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            {% endif %}
+                        {% else %}
+                            <div class="mb-3">
+                                <label for="pushTarget" class="form-label">Push Target URL</label>
+                                <input type="text" class="form-control" id="pushTarget" placeholder="rtmp://example.com/app/streamkey">
+                                <div class="form-text">Must start with rtmp://, rtmps://, or srt://</div>
+                            </div>
+                            <button id="addAutoPushBtn" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Add Automatic Push
+                            </button>
+                        {% endif %}
+                    </div>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
+
+                <!-- Active Pushes Card -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-send-arrow-up"></i> Active Pushes</span>
+                        <span class="badge bg-primary" id="activePushesCount">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div id="activePushesContainer">
+                            <div class="text-center py-3">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <!-- Stream URLs Card -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -730,13 +796,13 @@ document.querySelectorAll('.toggle-push').forEach(btn => {
         const currentState = this.dataset.currentState;
         const newState = currentState === 'active' ? 'inactive' : 'active';
         
-        this.disabled = true;
         this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         
         fetch('/api/toggle_push', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
             },
             body: JSON.stringify({
                 push_id: pushId,
@@ -746,37 +812,14 @@ document.querySelectorAll('.toggle-push').forEach(btn => {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                const pushConfig = this.closest('.push-config');
-
-                if (newState === 'inactive') {
-                    pushConfig.classList.remove('push-active');
-                    pushConfig.classList.add('push-inactive');
-                    this.classList.remove('btn-warning');
-                    this.classList.add('btn-success');
-                    this.textContent = 'Activate';
-                    pushConfig.querySelector('.badge').className = 'badge bg-danger';
-                    pushConfig.querySelector('.badge').textContent = 'INACTIVE';
-                } else {
-                    pushConfig.classList.remove('push-inactive');
-                    pushConfig.classList.add('push-active');
-                    this.classList.remove('btn-success');
-                    this.classList.add('btn-warning');
-                    this.textContent = 'Deactivate';
-                    pushConfig.querySelector('.badge').className = 'badge bg-success';
-                    pushConfig.querySelector('.badge').textContent = 'ACTIVE';
-                }
-
-                this.dataset.currentState = newState;
+                updatePushConfigsUI(); // Refresh the UI
             } else {
-                alert('Error: ' + (data.error || 'Operation failed'));
+                throw new Error(data.error || 'Operation failed');
             }
         })
         .catch(error => {
             console.error('Error toggling push:', error);
-        })
-        .finally(() => {
-            this.disabled = false;
-            this.innerHTML = newState === 'active' ? 'Deactivate' : 'Activate';
+            alert('Error: ' + error.message);
         });
     });
 });
@@ -794,13 +837,13 @@ document.querySelectorAll('.update-url-btn').forEach(btn => {
             return;
         }
 
-        button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
         fetch('/api/update_push_url', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
             },
             body: JSON.stringify({ 
                 push_id: pushId, 
@@ -810,21 +853,15 @@ document.querySelectorAll('.update-url-btn').forEach(btn => {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                button.innerHTML = '<i class="bi bi-check"></i>';
-                setTimeout(() => {
-                    button.innerHTML = 'Update';
-                    button.disabled = false;
-                }, 1000);
+                updatePushConfigsUI(); // Refresh the UI
             } else {
-                alert('Error: ' + (data.error || 'Update failed'));
-                button.innerHTML = 'Update';
-                button.disabled = false;
+                throw new Error(data.error || 'Update failed');
             }
         })
         .catch(error => {
             console.error('Error updating URL:', error);
+            alert('Error: ' + error.message);
             button.innerHTML = 'Update';
-            button.disabled = false;
         });
     });
 });
@@ -1225,6 +1262,379 @@ style.textContent = `
     }
 `;
 document.head.appendChild(style);
+
+// Modified updatePushConfigsUI function
+async function updatePushConfigsUI() {
+    try {
+        const response = await fetch(`/api/streams`, {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+        });
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+                return;
+            }
+            throw new Error('Failed to fetch stream data');
+        }
+
+        const data = await response.json();
+        const stream = data.streams['{{ original_name }}'];
+        if (!stream) return;
+
+        // Update the Push Configurations card
+        const pushConfigs = stream.push_configs || [];
+        const pushConfigsCard = document.querySelector('.card .card-header:has(i.bi-send)')?.parentElement;
+        if (pushConfigsCard) {
+            let html = '';
+            if (pushConfigs.length > 0) {
+                html += `<div class="push-status-section"><div class="push-status-container">`;
+                pushConfigs.forEach(push => {
+                    html += `
+                        <div class="push-config ${!push.deactivated ? 'push-active' : 'push-inactive'}">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <strong>Status:</strong> 
+                                    <span class="badge bg-${!push.deactivated ? 'success' : 'danger'}">
+                                        ${!push.deactivated ? 'ACTIVE' : 'INACTIVE'}
+                                    </span>
+                                </div>
+                                <div class="text-end">
+                                    <div><strong>Target:</strong></div>
+                                    <div class="push-target">
+                                        ${push.target.length > 20 ? push.target.substring(0, 20) + '...' : push.target}
+                                    </div>
+                                </div>
+                            </div>
+                            ${push.notes ? `<div class="push-notes mt-1"><strong>Notes:</strong> ${push.notes}</div>` : ''}
+                            <div class="push-controls mt-2">
+                                <div class="input-group input-group-sm mb-2">
+                                    <input type="text" class="form-control push-url-input" value="${push.target}" />
+                                    <button class="btn btn-outline-primary update-url-btn" data-push-id="${push.push_id}">
+                                        Update
+                                    </button>
+                                </div>
+                                <div class="text-end">
+                                    <button class="btn btn-sm btn-${!push.deactivated ? 'warning' : 'success'} toggle-push" 
+                                            data-push-id="${push.push_id}" 
+                                            data-current-state="${!push.deactivated ? 'active' : 'inactive'}">
+                                        ${!push.deactivated ? 'Deactivate' : 'Activate'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>`;
+                });
+                html += `</div></div>`;
+            } else {
+                html = '<p class="text-muted">No push configurations for this stream.</p>';
+            }
+            pushConfigsCard.querySelector('.card-body').innerHTML = html;
+            
+            // Update badge count
+            const badge = pushConfigsCard.querySelector('.badge.bg-primary');
+            if (badge) badge.textContent = pushConfigs.length;
+        }
+
+        // Update the Automatic Push Configuration card
+        const autoPushCard = document.querySelector('.card .card-header:has(i.bi-gear)')?.parentElement;
+        if (autoPushCard) {
+            let html = '';
+            if (pushConfigs.length > 0) {
+                html += `
+                    <div class="alert alert-info">
+                        This stream has ${pushConfigs.length} automatic push configuration(s)
+                    </div>
+                    <button id="removeAutoPushBtn" class="btn btn-danger">
+                        <i class="bi bi-trash"></i> Remove Automatic Push
+                    </button>`;
+                
+                if (pushConfigs.length > 1) {
+                    html += `
+                        <div class="mt-3">
+                            <label class="form-label">Select Push to Remove:</label>
+                            <select class="form-select" id="pushToRemoveSelect">
+                                ${pushConfigs.map(push => 
+                                    `<option value="${push.push_id}">${push.target.substring(0, 30)}${push.target.length > 30 ? '...' : ''}</option>`
+                                ).join('')}
+                            </select>
+                        </div>`;
+                }
+            } else {
+                html += `
+                    <div class="mb-3">
+                        <label for="pushTarget" class="form-label">Push Target URL</label>
+                        <input type="text" class="form-control" id="pushTarget" placeholder="rtmp://example.com/app/streamkey">
+                        <div class="form-text">Must start with rtmp://, rtmps://, or srt://</div>
+                    </div>
+                    <button id="addAutoPushBtn" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> Add Automatic Push
+                    </button>`;
+            }
+            autoPushCard.querySelector('.card-body').innerHTML = html;
+        }
+
+        // Rebind all event listeners after UI update
+        bindPushConfigEventListeners();
+
+    } catch (error) {
+        console.error('Failed to update push configs UI:', error);
+        alert('Error updating UI: ' + error.message);
+    }
+}
+
+// New function to bind all push config event listeners
+function bindPushConfigEventListeners() {
+    // Bind toggle push buttons
+    document.querySelectorAll('.toggle-push').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const pushId = this.dataset.pushId;
+            const currentState = this.dataset.currentState;
+            const newState = currentState === 'active' ? 'inactive' : 'active';
+            
+            this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            
+            fetch('/api/toggle_push', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify({
+                    push_id: pushId,
+                    new_state: newState
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updatePushConfigsUI();
+                } else {
+                    throw new Error(data.error || 'Operation failed');
+                }
+            })
+            .catch(error => {
+                console.error('Error toggling push:', error);
+                alert('Error: ' + error.message);
+            });
+        });
+    });
+    
+    // Bind update URL buttons
+    document.querySelectorAll('.update-url-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const button = this;
+            const input = button.closest('.input-group').querySelector('.push-url-input');
+            const pushId = button.dataset.pushId;
+            const newUrl = input.value.trim();
+
+            if (!newUrl) {
+                alert('Please enter a valid URL');
+                return;
+            }
+
+            button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+            fetch('/api/update_push_url', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify({ 
+                    push_id: pushId, 
+                    new_url: newUrl 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updatePushConfigsUI();
+                } else {
+                    throw new Error(data.error || 'Update failed');
+                }
+            })
+            .catch(error => {
+                console.error('Error updating URL:', error);
+                alert('Error: ' + error.message);
+                button.innerHTML = 'Update';
+            });
+        });
+    });
+    
+    // Bind add auto push button
+    const addAutoPushBtn = document.getElementById('addAutoPushBtn');
+    if (addAutoPushBtn) {
+        addAutoPushBtn.addEventListener('click', async function() {
+            const target = document.getElementById('pushTarget').value.trim();
+            if (!target) {
+                showDynamicToast('Please enter a target URL');
+                return;
+            }
+            if (!target.startsWith('rtmp://') && !target.startsWith('rtmps://') && !target.startsWith('srt://')) {
+                showDynamicToast('URL must start with rtmp://, rtmps://, or srt://');
+                return;
+            }
+
+            const button = this;
+            const originalText = button.innerHTML;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Adding...';
+            button.disabled = true;
+
+            try {
+                const response = await fetch('/api/push_auto_add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({
+                        push_auto_add: {
+                            stream: '{{ original_name }}',
+                            target: target,
+                            "x-LSP-notes": "Push from Live Fusion Dashboard"
+                        }
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.status === 403 && data.error === "push_limit_reached") {
+                    showDynamicToast(data.message);
+                } 
+                else if (!response.ok) {
+                    throw new Error(data.error || 'Failed to add automatic push');
+                }
+                else {
+                    showDynamicToast('Push added successfully!', 'success');
+                    document.getElementById('pushTarget').value = '';
+                    await updatePushConfigsUI();
+                }
+            } catch (error) {
+                showDynamicToast(error.message);
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        });
+    }
+    
+    // Bind remove auto push button
+    const removeAutoPushBtn = document.getElementById('removeAutoPushBtn');
+    if (removeAutoPushBtn) {
+        removeAutoPushBtn.addEventListener('click', async function() {
+            const button = this;
+            const originalText = button.innerHTML;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Removing...';
+
+            try {
+                // Get the push ID from the select element or the first push config
+                const pushToRemoveSelect = document.getElementById('pushToRemoveSelect');
+                let pushId;
+                
+                if (pushToRemoveSelect) {
+                    pushId = pushToRemoveSelect.value;
+                } else {
+                    // Get the first push config from the current stream data
+                    const response = await fetch(`/api/streams`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch stream data');
+                    }
+                    
+                    const data = await response.json();
+                    const stream = data.streams['{{ original_name }}'];
+                    if (!stream || !stream.push_configs || stream.push_configs.length === 0) {
+                        throw new Error('No push configuration to remove');
+                    }
+                    pushId = stream.push_configs[0].push_id;
+                }
+
+                if (!pushId) {
+                    throw new Error('No push configuration to remove');
+                }
+
+                // Remove the push configuration
+                const response = await fetch('/api/push_auto_remove', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ push_id: pushId })
+                });
+
+                if (response.status === 401) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    button.innerHTML = '<i class="bi bi-check"></i> Removed!';
+                    await updatePushConfigsUI();
+                    setTimeout(() => {
+                        button.innerHTML = originalText;
+                    }, 2000);
+                } else {
+                    throw new Error(data.error || 'Failed to remove automatic push');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                button.innerHTML = '<i class="bi bi-x"></i> Failed';
+                setTimeout(() => {
+                    button.innerHTML = originalText;
+                }, 2000);
+                alert('Error: ' + error.message);
+            }
+        });
+    }
+}
+
+// Initialize the push config UI and event listeners when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+    updatePushConfigsUI();
+});
+
+// Add toast and push management functions
+function showDynamicToast(message, type = 'error') {
+    const toastContainer = document.getElementById('toastContainer');
+    
+    // Create toast element
+    const toastEl = document.createElement('div');
+    toastEl.className = `toast show align-items-center text-white bg-${type === 'error' ? 'danger' : 'success'} border-0`;
+    toastEl.setAttribute('role', 'alert');
+    toastEl.setAttribute('aria-live', 'assertive');
+    toastEl.setAttribute('aria-atomic', 'true');
+    
+    // Toast content
+    toastEl.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">
+                ${message}
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    `;
+    
+    // Add to container
+    toastContainer.appendChild(toastEl);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        toastEl.classList.remove('show');
+        setTimeout(() => toastEl.remove(), 150);
+    }, 5000);
+}
+
 </script>
 </body>
 </html>

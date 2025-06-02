@@ -942,91 +942,6 @@ async def stream_detail(request: Request, stream_name: str, current_user: User =
         "current_user": current_user
     })
 
-@app.get("/api/stream/{stream_name}/active_pushes")
-async def get_stream_active_pushes(
-    stream_name: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Get active push PIDs and formatted connection times for a specific stream"""
-    try:
-        # Verify stream exists and user has access
-        stream = monitor.stream_data.get(stream_name)
-        if not stream:
-            raise HTTPException(status_code=404, detail="Stream not found")
-        
-        # Check permissions for non-admin users
-        if current_user.role != "admin":
-            user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
-            stream_tags = stream.get("tags", []) or []  # Ensure stream_tags is a list
-            if not user_tags or not any(tag in user_tags for tag in stream_tags):
-                raise HTTPException(status_code=403, detail="Access denied")
-
-        # Get active pushes with error handling
-        try:
-            resp = monitor.session.get(
-                monitor.base_url, 
-                params={"command": json.dumps({"push_list": True})},
-                timeout=5  # Add timeout
-            )
-            resp.raise_for_status()  # Raises exception for 4XX/5XX responses
-            active_pushes = resp.json().get("push_list", []) or []  # Ensure we have a list
-        except Exception as e:
-            active_pushes = []
-
-        # Filter and format pushes
-        result = []
-        for push in active_pushes:
-            # Validate push structure
-            if not isinstance(push, (list, dict)) or len(push) < 6:
-                continue
-                
-            if push[1] == stream_name:  # push[1] is stream name
-                stats = push[5] if len(push) > 5 else {}
-                active_seconds = stats.get("active_seconds", 0)
-                
-                # Format seconds to HH:MM:SS
-                hours, remainder = divmod(active_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                
-                result.append({
-                    "pid": push[0],  # Process ID
-                    "active_seconds": active_seconds,
-                    "formatted_time": formatted_time
-                })
-        
-        return {"pushes": result}
-    
-    except HTTPException:
-        raise  # Re-raise HTTP exceptions
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-@app.get("/api/stream/{stream_name}/input_stats")
-async def get_stream_input_stats(
-    stream_name: str, 
-    current_user: User = Depends(get_current_user)
-):
-    """API endpoint for stream input statistics"""
-    # Check permissions
-    stream = monitor.stream_data.get(stream_name)
-    if not stream:
-        raise HTTPException(status_code=404, detail="Stream not found")
-    
-    # Get user's allowed tags
-    user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
-    
-    # Check access for non-admin users
-    if current_user.role != "admin":
-        stream_tags = set(stream.get("tags", []))
-        if not user_tags or not any(tag in user_tags for tag in stream_tags):
-            raise HTTPException(status_code=403, detail="Access denied")
-    
-    stats = await monitor.get_stream_input_stats(stream_name)
-    return {"input_stats": stats}
-    
-# ==================== API Routes ====================
-
 @app.get("/api/stream_views")
 async def get_stream_views():
     """API endpoint for just viewer counts (lightweight for frequent polling)"""
@@ -1039,6 +954,59 @@ async def get_stream_views():
         for stream_name, stream_info in monitor.stream_data.items()
     }
 
+@app.post("/api/update_push_url")
+async def update_push_url(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Update push target URL"""
+    try:
+        data = await request.json()
+        push_id = data.get("push_id")
+        new_url = data.get("new_url")
+        
+        # Get the current push config
+        push_config = monitor.push_configs.get(push_id)
+        if not push_config:
+            return JSONResponse({"success": False, "error": "Push configuration not found"}, status_code=404)
+        
+        # Validate the new URL
+        if not new_url.startswith(('rtmp://', 'rtmps://', 'srt://')):
+            return JSONResponse({"success": False, "error": "Invalid URL format. Must start with rtmp://, rtmps://, or srt://"})
+            
+        # Update the target URL in the config
+        push_config['target'] = new_url
+        
+        # Prepare the update command
+        update_cmd = {
+            "push_auto_add": {
+                push_id: {
+                    **push_config,
+                    "x-LSP-notes": push_config.get("x-LSP-notes", monitor._get_push_notes())
+                }
+            }
+        }
+        
+        # Send to MistServer
+        resp = monitor.session.get(
+            monitor.base_url,
+            params={"command": json.dumps(update_cmd)}
+        )
+        
+        if resp.status_code != 200:
+            return JSONResponse({"success": False, "error": "Failed to update push configuration"}, status_code=500)
+            
+        # Update our local cache
+        monitor.push_configs[push_id] = push_config
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Push URL updated successfully",
+            "push_configs": monitor.push_configs
+        })
+        
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 @app.get("/api/user/push_limit")
 async def get_user_push_limit(
@@ -1056,49 +1024,399 @@ async def get_user_push_limit(
         "current_pushes": user_limit.current_pushes
     }
 
-@app.post("/api/update_push_url")
-async def update_push_url(request: Request):
-    """Update push target URL"""
+@app.get("/api/streams", response_class=JSONResponse)
+async def get_streams_api(current_user: User = Depends(get_current_user)):
+    """API endpoint for stream data"""
+    # Create a filtered response based on user role
+    await monitor.get_push_configurations()
+    response_data = {}
+    
+    # Get user's allowed tags
+    user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
+    
+    for stream_name, stream_info in monitor.stream_data.items():
+        push_info = monitor.get_push_info_for_stream(stream_name)
+        
+        # For non-admin users, filter streams based on allowed tags
+        if current_user.role != "admin":
+            stream_tags = set(stream_info.get("tags", []))
+            if not user_tags or not any(tag in user_tags for tag in stream_tags):
+                continue
+        
+        # Include all stream data with display name if mapped
+        response_data[stream_name] = {
+            **stream_info,
+            "display_name": STREAM_DISPLAY_NAMES.get(stream_name, stream_name),
+            "tags": stream_info.get("tags", []),
+            "metadata": stream_info.get("metadata", {}),
+            "processes": stream_info.get("processes", []),
+            "push_configs": push_info,  # Use freshly fetched push info
+            "stream_urls": stream_info.get("stream_urls", {})
+        }
+    
+    return {
+        "streams": response_data,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/pushes", response_class=JSONResponse)
+async def get_pushes_api():
+    """API endpoint for push configuration data"""
+    # Create a list of pushes with their cleaned names and status
+    push_list = []
+    for push_id, config in monitor.push_configs.items():
+        stream_name = config['stream']
+        is_active = not stream_name.startswith('💤deactivated💤_')
+        cleaned_name = stream_name.replace('💤deactivated💤_', '') if not is_active else stream_name
+        
+        push_list.append({
+            'id': push_id,
+            'name': cleaned_name,
+            'is_active': is_active,
+            'original_name': stream_name,
+            'config': config
+        })
+    
+    # Sort by cleaned name
+    push_list.sort(key=lambda x: x['name'])
+    
+    # Rebuild the pushes dictionary in sorted order
+    sorted_pushes = {}
+    for item in push_list:
+        sorted_pushes[item['id']] = item['config']
+    
+    return {
+        "pushes": sorted_pushes,
+        "sorted_list": push_list,  # Optional: includes the cleaned names and status
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/user/pushes")
+async def get_user_pushes(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all pushes for streams in user's assigned tags"""
+    if current_user.role == "admin":
+        # Admins can see all pushes
+        return {"pushes": list(monitor.push_configs.values())}
+    
+    user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
+    user_pushes = []
+    
+    await monitor.get_push_configurations()
+    
+    for push_id, config in monitor.push_configs.items():
+        config_stream = config.get('stream', '')
+        if config_stream.startswith('💤deactivated💤_'):
+            continue
+            
+        clean_stream = config_stream.replace('💤deactivated💤_', '')
+        
+        if clean_stream in monitor.stream_data:
+            stream_tags = set(monitor.stream_data[clean_stream].get('tags', []))
+            if any(tag in user_tags for tag in stream_tags):
+                user_pushes.append({
+                    "push_id": push_id,
+                    "stream_name": clean_stream,
+                    "target": config.get('target'),
+                    "notes": config.get('x-LSP-notes', '')
+                })
+    
+    return {"pushes": user_pushes}
+
+# Add WebSocket endpoints with explicit WSS support
+@app.websocket("/ws/input_stats/{stream_name}")
+async def websocket_input_stats(websocket: WebSocket, stream_name: str):
+    await manager.connect(websocket, "input_stats")
+    try:
+        while True:
+            # Get input stats
+            stats = await monitor.get_stream_input_stats(stream_name)
+            await websocket.send_json({"input_stats": stats})
+            await asyncio.sleep(1)  # Update every second
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, "input_stats")
+    except Exception as e:
+        print(f"Error in input stats websocket: {e}")
+        manager.disconnect(websocket, "input_stats")
+
+@app.websocket("/ws/active_pushes/{stream_name}")
+async def websocket_active_pushes(websocket: WebSocket, stream_name: str):
+    await manager.connect(websocket, "active_pushes")
+    try:
+        while True:
+            # Get active pushes
+            resp = monitor.session.get(
+                monitor.base_url, 
+                params={"command": json.dumps({"push_list": True})},
+                timeout=5
+            )
+            active_pushes = resp.json().get("push_list", []) or []
+            
+            # Filter and format pushes for this stream
+            result = []
+            for push in active_pushes:
+                if not isinstance(push, (list, dict)) or len(push) < 6:
+                    continue
+                    
+                if push[1] == stream_name:
+                    stats = push[5] if len(push) > 5 else {}
+                    active_seconds = stats.get("active_seconds", 0)
+                    
+                    hours, remainder = divmod(active_seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    
+                    result.append({
+                        "pid": push[0],
+                        "active_seconds": active_seconds,
+                        "formatted_time": formatted_time
+                    })
+            
+            await websocket.send_json({"pushes": result})
+            await asyncio.sleep(1)  # Update every second
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, "active_pushes")
+    except Exception as e:
+        print(f"Error in active pushes websocket: {e}")
+        manager.disconnect(websocket, "active_pushes")
+
+@app.websocket("/ws/stream_data/{stream_name}")
+async def websocket_stream_data(websocket: WebSocket, stream_name: str):
+    await manager.connect(websocket, "stream_data")
+    try:
+        while True:
+            # Get stream data
+            stream = monitor.stream_data.get(stream_name)
+            if stream:
+                await websocket.send_json({
+                    "current_viewers": stream.get("current_viewers", 0),
+                    "max_viewers": stream.get("max_viewers", 0),
+                    "is_online": stream.get("is_online", False),
+                    "last_updated": stream.get("last_updated", "")
+                })
+            await asyncio.sleep(1)  # Update every second
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, "stream_data")
+    except Exception as e:
+        print(f"Error in stream data websocket: {e}")
+        manager.disconnect(websocket, "stream_data")
+
+@app.post("/api/push_auto_add")
+async def push_auto_add(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Add an automatic push configuration with user limit checks"""
     try:
         data = await request.json()
-        push_id = data.get("push_id")
-        new_url = data.get("new_url")
+        push_config = data.get("push_auto_add", {})
         
-        # Get the current push config
-        push_config = monitor.push_configs.get(push_id)
         if not push_config:
-            return JSONResponse({"success": False, "error": "Push configuration not found"}, status_code=404)
+            raise HTTPException(status_code=400, detail="Invalid request format")
+            
+        stream_name = push_config.get("stream")
+        target = push_config.get("target")
         
-        # Validate the new URL
-        if not new_url.startswith(('rtmp://', 'rtmps://', 'srt://')):
-            return JSONResponse({"success": False, "error": "Invalid URL format. Must start with rtmp://, rtmps://, or srt://"}, status_code=400)
+        # Validate input
+        if not stream_name or not target:
+            raise HTTPException(status_code=400, detail="Stream name and target are required")
+            
+        # Check if stream exists
+        if stream_name not in monitor.stream_data:
+            raise HTTPException(status_code=404, detail="Stream not found")
+            
+        # Admin bypasses all checks
+        if current_user.role == "admin":
+            # Generate push ID and add the push
+            push_id = hashlib.md5(f"{stream_name}_{target}_{datetime.now()}".encode()).hexdigest()
+            cmd = {
+                "push_auto_add": {
+                    push_id: {
+                        "stream": stream_name,
+                        "target": target,
+                        "x-LSP-notes": "Added by admin"
+                    }
+                }
+            }
+            
+            resp = monitor.session.get(monitor.base_url, params={"command": json.dumps(cmd)})
+            if resp.status_code != 200:
+                raise HTTPException(status_code=500, detail="Failed to add push configuration")
+                
+            await monitor.get_push_configurations()
+            return JSONResponse({"success": True, "message": "Push added successfully"})
+            
+        # For regular users - enforce push limits
+        user_limit = db.query(UserPushLimit).filter(UserPushLimit.user_id == current_user.id).first()
+        if not user_limit:
+            user_limit = UserPushLimit(user_id=current_user.id, max_concurrent_pushes=1)
+            db.add(user_limit)
+            db.commit()
+            
+        # Get user's allowed tags
+        user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
         
-        # Prepare the update command
-        update_cmd = {
+        # Count how many active pushes user already has in their allowed streams
+        await monitor.get_push_configurations()
+        user_push_count = 0
+        
+        for push_id, config in monitor.push_configs.items():
+            config_stream = config.get('stream', '')
+            
+            # Skip deactivated pushes
+            if config_stream.startswith('💤deactivated💤_'):
+                continue
+                
+            # Clean stream name
+            clean_stream = config_stream.replace('💤deactivated💤_', '')
+            
+            # Check if this push is for one of user's allowed streams
+            if clean_stream in monitor.stream_data:
+                stream_tags = set(monitor.stream_data[clean_stream].get('tags', []))
+                if any(tag in user_tags for tag in stream_tags):
+                    user_push_count += 1
+        
+        # Check push limit
+        if user_push_count >= user_limit.max_concurrent_pushes:
+            # Find which pushes are already configured in their streams
+            existing_pushes = []
+            for push_id, config in monitor.push_configs.items():
+                config_stream = config.get('stream', '').replace('💤deactivated💤_', '')
+                if config_stream in monitor.stream_data:
+                    stream_tags = set(monitor.stream_data[config_stream].get('tags', []))
+                    if any(tag in user_tags for tag in stream_tags):
+                        existing_pushes.append({
+                            "stream": config_stream,
+                            "target": config.get('target'),
+                            "push_id": push_id
+                        })
+            
+            return JSONResponse({
+                "success": False,
+                "error": "push_limit_reached",
+                "message": "You can only have 1 active push across your assigned streams",
+                "existing_pushes": existing_pushes,
+                "limit": user_limit.max_concurrent_pushes
+            }, status_code=403)
+            
+        # If we get here, user is under their limit - add the push
+        push_id = hashlib.md5(f"{stream_name}_{target}_{datetime.now()}".encode()).hexdigest()
+        cmd = {
             "push_auto_add": {
                 push_id: {
-                    **push_config,
-                    "target": new_url,
-                    "x-LSP-notes": push_config.get("x-LSP-notes", monitor._get_push_notes())
+                    "stream": stream_name,
+                    "target": target,
+                    "x-LSP-notes": f"Added by user {current_user.username}"
                 }
             }
         }
         
-        # Send the command to MistServer
-        resp = monitor.session.get(monitor.base_url, params={"command": json.dumps(update_cmd)})
+        resp = monitor.session.get(monitor.base_url, params={"command": json.dumps(cmd)})
         if resp.status_code != 200:
-            return JSONResponse({"success": False, "error": "Failed to update push configuration"}, status_code=400)
+            raise HTTPException(status_code=500, detail="Failed to add push configuration")
+            
+        # Update push count
+        user_limit.current_pushes = user_push_count + 1
+        db.commit()
         
-        # Update our local cache
-        monitor.push_configs[push_id]['target'] = new_url
-        
+        await monitor.get_push_configurations()
         return JSONResponse({
             "success": True,
-            "new_url": new_url
+            "message": "Push added successfully",
+            "current_pushes": user_limit.current_pushes,
+            "max_pushes": user_limit.max_concurrent_pushes
         })
         
+    except HTTPException:
+        raise
     except Exception as e:
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/push_auto_remove")
+async def push_auto_remove(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Remove an automatic push configuration"""
+    try:
+        data = await request.json()
+        push_id = data.get("push_id")
+        
+        if not push_id:
+            raise HTTPException(status_code=400, detail="Push ID is required")
+            
+        # Get the push configuration
+        push_config = monitor.push_configs.get(push_id)
+        if not push_config:
+            raise HTTPException(status_code=404, detail="Push configuration not found")
+            
+        # Get stream name from config
+        stream_name = push_config.get('stream', '')
+        if not stream_name:
+            raise HTTPException(status_code=400, detail="Invalid push configuration")
+            
+        # Clean stream name by removing deactivation prefix
+        cleaned_stream_name = stream_name.replace('💤deactivated💤_', '')
+        
+        # Check if stream exists
+        if cleaned_stream_name not in monitor.stream_data:
+            raise HTTPException(status_code=404, detail="Stream not found")
+            
+        # First, try to stop any active pushes for this stream
+        try:
+            resp = monitor.session.get(
+                monitor.base_url,
+                params={"command": json.dumps({"push_list": True})}
+            )
+            if resp.status_code == 200:
+                active_pushes = resp.json().get("push_list", [])
+                pids_to_stop = []
+                
+                for push in active_pushes:
+                    if len(push) >= 2 and push[1] == cleaned_stream_name:
+                        pids_to_stop.append(push[0])
+                
+                if pids_to_stop:
+                    stop_cmd = {"push_stop": pids_to_stop[0]} if len(pids_to_stop) == 1 else {"push_stop": pids_to_stop}
+                    monitor.session.get(
+                        monitor.base_url,
+                        params={"command": json.dumps(stop_cmd)}
+                    )
+        except Exception as e:
+            print(f"Error stopping push: {str(e)}")
+            
+        # Now remove the push configuration
+        cmd = {
+            "push_auto_remove": push_id
+        }
+        
+        # Send to MistServer
+        resp = monitor.session.get(
+            monitor.base_url,
+            params={"command": json.dumps(cmd)}
+        )
+        
+        if resp.status_code != 200:
+            raise HTTPException(status_code=500, detail="Failed to remove push configuration")
+            
+        # Refresh push configurations
+        await monitor.get_push_configurations()
+        
+        # Return the updated push configurations
+        return JSONResponse({
+            "success": True,
+            "message": "Push configuration removed successfully",
+            "push_configs": monitor.push_configs  # Include the updated configs
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
         
 @app.on_event("startup")
 async def startup_event():
@@ -1306,152 +1624,3 @@ async def toggle_push(
     except Exception as e:
         print(f"Error toggling push: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-       
-@app.get("/api/streams", response_class=JSONResponse)
-async def get_streams_api(current_user: User = Depends(get_current_user)):
-    """API endpoint for stream data"""
-    # Create a filtered response based on user role
-    await monitor.get_push_configurations()
-    response_data = {}
-    
-    # Get user's allowed tags
-    user_tags = current_user.allowed_tags.split(",") if current_user.allowed_tags else []
-    
-    for stream_name, stream_info in monitor.stream_data.items():
-        push_info = monitor.get_push_info_for_stream(stream_name)
-        
-        # For non-admin users, filter streams based on allowed tags
-        if current_user.role != "admin":
-            stream_tags = set(stream_info.get("tags", []))
-            if not user_tags or not any(tag in user_tags for tag in stream_tags):
-                continue
-        
-        # Include all stream data with display name if mapped
-        response_data[stream_name] = {
-            **stream_info,
-            "display_name": STREAM_DISPLAY_NAMES.get(stream_name, stream_name),
-            "tags": stream_info.get("tags", []),
-            "metadata": stream_info.get("metadata", {}),
-            "processes": stream_info.get("processes", []),
-            "push_configs": push_info,  # Use freshly fetched push info
-            "stream_urls": stream_info.get("stream_urls", {})
-        }
-    
-    return {
-        "streams": response_data,
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.get("/api/pushes", response_class=JSONResponse)
-async def get_pushes_api():
-    """API endpoint for push configuration data"""
-    # Create a list of pushes with their cleaned names and status
-    push_list = []
-    for push_id, config in monitor.push_configs.items():
-        stream_name = config['stream']
-        is_active = not stream_name.startswith('💤deactivated💤_')
-        cleaned_name = stream_name.replace('💤deactivated💤_', '') if not is_active else stream_name
-        
-        push_list.append({
-            'id': push_id,
-            'name': cleaned_name,
-            'is_active': is_active,
-            'original_name': stream_name,
-            'config': config
-        })
-    
-    # Sort by cleaned name
-    push_list.sort(key=lambda x: x['name'])
-    
-    # Rebuild the pushes dictionary in sorted order
-    sorted_pushes = {}
-    for item in push_list:
-        sorted_pushes[item['id']] = item['config']
-    
-    return {
-        "pushes": sorted_pushes,
-        "sorted_list": push_list,  # Optional: includes the cleaned names and status
-        "timestamp": datetime.now().isoformat()
-    }
-
-# Add WebSocket endpoints with explicit WSS support
-@app.websocket("/ws/input_stats/{stream_name}")
-async def websocket_input_stats(websocket: WebSocket, stream_name: str):
-    await manager.connect(websocket, "input_stats")
-    try:
-        while True:
-            # Get input stats
-            stats = await monitor.get_stream_input_stats(stream_name)
-            await websocket.send_json({"input_stats": stats})
-            await asyncio.sleep(1)  # Update every second
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, "input_stats")
-    except Exception as e:
-        print(f"Error in input stats websocket: {e}")
-        manager.disconnect(websocket, "input_stats")
-
-@app.websocket("/ws/active_pushes/{stream_name}")
-async def websocket_active_pushes(websocket: WebSocket, stream_name: str):
-    await manager.connect(websocket, "active_pushes")
-    try:
-        while True:
-            # Get active pushes
-            resp = monitor.session.get(
-                monitor.base_url, 
-                params={"command": json.dumps({"push_list": True})},
-                timeout=5
-            )
-            active_pushes = resp.json().get("push_list", []) or []
-            
-            # Filter and format pushes for this stream
-            result = []
-            for push in active_pushes:
-                if not isinstance(push, (list, dict)) or len(push) < 6:
-                    continue
-                    
-                if push[1] == stream_name:
-                    stats = push[5] if len(push) > 5 else {}
-                    active_seconds = stats.get("active_seconds", 0)
-                    
-                    hours, remainder = divmod(active_seconds, 3600)
-                    minutes, seconds = divmod(remainder, 60)
-                    formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                    
-                    result.append({
-                        "pid": push[0],
-                        "active_seconds": active_seconds,
-                        "formatted_time": formatted_time
-                    })
-            
-            await websocket.send_json({"pushes": result})
-            await asyncio.sleep(1)  # Update every second
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, "active_pushes")
-    except Exception as e:
-        print(f"Error in active pushes websocket: {e}")
-        manager.disconnect(websocket, "active_pushes")
-
-@app.websocket("/ws/stream_data/{stream_name}")
-async def websocket_stream_data(websocket: WebSocket, stream_name: str):
-    await manager.connect(websocket, "stream_data")
-    try:
-        while True:
-            # Get stream data
-            stream = monitor.stream_data.get(stream_name)
-            if stream:
-                await websocket.send_json({
-                    "current_viewers": stream.get("current_viewers", 0),
-                    "max_viewers": stream.get("max_viewers", 0),
-                    "is_online": stream.get("is_online", False),
-                    "last_updated": stream.get("last_updated", "")
-                })
-            await asyncio.sleep(1)  # Update every second
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, "stream_data")
-    except Exception as e:
-        print(f"Error in stream data websocket: {e}")
-        manager.disconnect(websocket, "stream_data")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
