@@ -472,7 +472,11 @@ function connectWebSocket(type) {
             return;
         }
         
-    const ws = new WebSocket(`ws://${window.location.host}/ws/${type}/{{ original_name }}`);
+    // Determine WebSocket protocol based on page protocol
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/${type}/{{ original_name }}`;
+    
+    const ws = new WebSocket(wsUrl);
     wsConnections[type] = ws;
 
     ws.onopen = () => {
@@ -509,7 +513,7 @@ function connectWebSocket(type) {
             if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
                 wsReconnectAttempts++;
                 setTimeout(() => connectWebSocket(type), RECONNECT_DELAY * wsReconnectAttempts);
-        } else {
+            } else {
                 showConnectionError(type);
             }
         }
