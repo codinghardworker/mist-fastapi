@@ -1294,6 +1294,7 @@ async function updatePushConfigsUI() {
             if (pushConfigs.length > 0) {
                 html += `<div class="push-status-section"><div class="push-status-container">`;
                 pushConfigs.forEach(push => {
+                    const isAdmin = {{ 'true' if current_user.role == "admin" else 'false' }};
                     html += `
                         <div class="push-config ${!push.deactivated ? 'push-active' : 'push-inactive'}">
                             <div class="d-flex justify-content-between">
@@ -1310,7 +1311,7 @@ async function updatePushConfigsUI() {
                                     </div>
                                 </div>
                             </div>
-                            ${push.notes ? `<div class="push-notes mt-1"><strong>Notes:</strong> ${push.notes}</div>` : ''}
+                            ${push.notes && isAdmin ? `<div class="push-notes mt-1"><strong>Notes:</strong> ${push.notes}</div>` : ''}
                             <div class="push-controls mt-2">
                                 <div class="input-group input-group-sm mb-2">
                                     <input type="text" class="form-control push-url-input" value="${push.target}" />
