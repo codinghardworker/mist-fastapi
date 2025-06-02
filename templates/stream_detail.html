@@ -223,12 +223,13 @@
                                             </div>
                                         </div>
                                         {% if push.notes %}
+                                        {% if current_user.role == "admin" %}
                                         <div class="push-notes mt-1">
+                                            
                                             <strong>Notes:</strong> 
-                                            {% if current_user.role == "admin" %}
                                                 {{ push.notes }}
-                                            {% endif %}
                                         </div>
+                                          {% endif %}
                                         {% endif %}
                                         <div class="push-controls mt-2">
                                             <div class="input-group input-group-sm mb-2">
