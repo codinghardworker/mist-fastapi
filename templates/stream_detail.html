@@ -178,12 +178,12 @@
                             <div class="push-status-section">
                                 <div class="push-status-container">
                                     {% for push in push_configs %}
-                                    <div class="push-config {% if push.deactivated %}push-inactive{% else %}push-active{% endif %}">
+                                    <div class="push-config {% if not push.deactivated %}push-active{% else %}push-inactive{% endif %}">
                                         <div class="d-flex justify-content-between">
                                             <div>
                                                 <strong>Status:</strong>
-                                                <span class="badge bg-{% if push.deactivated %}danger{% else %}success{% endif %}">
-                                                    {% if push.deactivated %}INACTIVE{% else %}ACTIVE{% endif %}
+                                                <span class="badge bg-{% if not push.deactivated %}success{% else %}danger{% endif %}">
+                                                    {% if not push.deactivated %}ACTIVE{% else %}INACTIVE{% endif %}
                                                 </span>
                                             </div>
                                             <div class="text-end">
@@ -198,7 +198,6 @@
                                             <strong>Notes:</strong> 
                                             {% if current_user.role == "admin" %}
                                                 {{ push.notes }}
-
                                             {% endif %}
                                         </div>
                                         {% endif %}
@@ -218,11 +217,11 @@
                                             </div>
                                             <div class="text-end">
                                                 <button
-                                                    class="btn btn-sm btn-{% if push.deactivated %}success{% else %}warning{% endif %} toggle-push"
+                                                    class="btn btn-sm btn-{% if not push.deactivated %}warning{% else %}success{% endif %} toggle-push"
                                                     data-push-id="{{ push.push_id }}"
-                                                    data-current-state="{% if push.deactivated %}inactive{% else %}active{% endif %}"
+                                                    data-current-state="{% if not push.deactivated %}active{% else %}inactive{% endif %}"
                                                 >
-                                                    {% if push.deactivated %}Activate{% else %}Deactivate{% endif %}
+                                                    {% if not push.deactivated %}Deactivate{% else %}Activate{% endif %}
                                                 </button>
                                             </div>
                                         </div>
@@ -399,16 +398,16 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-// Optimized Real-time Stream Details Script
-let updateTimer, consecutiveErrors = 0, interval = 3000, isUpdating = false;
-let viewerChart;
-
-// Initialize viewer chart
+// Optimize initial page load and connection handling
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize viewer chart with minimal data
 const ctx = document.getElementById('viewerChart').getContext('2d');
 const historyData = JSON.parse('{{ history_data|safe }}');
 
-const timestamps = historyData.map(point => new Date(point.timestamp).toLocaleTimeString());
-const viewers = historyData.map(point => point.viewers);
+    // Only keep last 5 points for initial load
+    const recentData = historyData.slice(-5);
+    const timestamps = recentData.map(point => new Date(point.timestamp).toLocaleTimeString());
+    const viewers = recentData.map(point => point.viewers);
 
 viewerChart = new Chart(ctx, {
     type: 'line',
@@ -425,283 +424,166 @@ viewerChart = new Chart(ctx, {
     },
     options: {
         responsive: true,
-        plugins: {
-            legend: {
-                display: false
-            }
-        },
+            animation: false,
+            plugins: { legend: { display: false } },
         scales: {
-            y: {
-                beginAtZero: true,
-                title: {
-                    display: true,
-                    text: 'Viewers'
-                }
-            },
-            x: {
-                title: {
-                    display: true,
-                    text: 'Time'
-                }
-            }
+                y: { beginAtZero: true, title: { display: true, text: 'Viewers' } },
+                x: { title: { display: true, text: 'Time' } }
         }
     }
 });
 
-// Optimized Active pushes updater with better error handling and caching
-let pushErrors = 0;
-let pushInterval = 5000; // Start with 5 seconds instead of 2
-let pushTimer = null;
-let isPushUpdating = false;
-let lastPushData = null;
-let pushDataCache = new Map();
-let pushTimerInterval = null;
+    // Initialize WebSocket connections with retry mechanism
+    initializeWebSockets();
+});
 
-// Separate timer management for push timers
-function startPushTimers() {
-    if (pushTimerInterval) clearInterval(pushTimerInterval);
-    
-    pushTimerInterval = setInterval(() => {
-        document.querySelectorAll('.push-timer').forEach(timer => {
-            const seconds = parseInt(timer.dataset.seconds) + 1;
-            timer.dataset.seconds = seconds;
-            
-            // Format seconds to HH:MM:SS
-            const hours = Math.floor(seconds / 3600);
-            const minutes = Math.floor((seconds % 3600) / 60);
-            const secs = seconds % 60;
-            const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-            
-            timer.innerHTML = `<i class="bi bi-stopwatch me-2 fs-6"></i>${formattedTime}`;
-        });
-    }, 1000);
+// WebSocket connection management
+let wsReconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_DELAY = 500;
+let wsConnections = {
+    input_stats: null,
+    active_pushes: null,
+    stream_data: null
+};
+
+function initializeWebSockets() {
+    // Close any existing connections
+    Object.values(wsConnections).forEach(ws => {
+        if (ws && ws.readyState !== WebSocket.CLOSED) {
+            ws.close();
+        }
+    });
+
+    // Reset connection attempts
+    wsReconnectAttempts = 0;
+
+    // Connect to all WebSockets
+    connectWebSocket('input_stats');
+    connectWebSocket('active_pushes');
+    connectWebSocket('stream_data');
 }
 
-function updateActivePushes() {
-    if (isPushUpdating) return;
-    isPushUpdating = true;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // Increased timeout
-    
-    fetch(`/api/stream/{{ original_name }}/active_pushes`, {
-        signal: controller.signal,
-        headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        }
-    })
-    .then(response => {
-        clearTimeout(timeoutId);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
-    })
-    .then(data => {
-        // Reset error count only after successful response
-        pushErrors = 0;
-        pushInterval = 5000; // Reset to base interval
-        
-        const container = document.getElementById('activePushesContainer');
-        const countBadge = document.getElementById('activePushesCount');
-        
-        // Check if data actually changed to avoid unnecessary DOM updates
-        const dataKey = JSON.stringify(data);
-        if (dataKey === lastPushData) {
-            return; // No changes, skip DOM update
-        }
-        lastPushData = dataKey;
-        
-        if (!data.pushes || data.pushes.length === 0) {
-            container.innerHTML = `
-                <div class="text-center py-3 text-muted">
-                    <i class="bi bi-send-slash"></i> No active pushes running
-                </div>
-            `;
-            countBadge.textContent = '0';
-            clearInterval(pushTimerInterval);
+function connectWebSocket(type) {
+    // Don't create new connection if one exists and is connecting/connected
+    if (wsConnections[type] && 
+        (wsConnections[type].readyState === WebSocket.CONNECTING || 
+         wsConnections[type].readyState === WebSocket.OPEN)) {
             return;
         }
         
-        countBadge.textContent = data.pushes.length;
-        
-        let html = '';
-        data.pushes.forEach((push, index) => {
-            html += `
-                <div class="card mb-3 border-primary active-push-card" style="transition: all 0.3s ease;">
-                    <div class="card-body p-3">
-                        <div class="d-flex align-items-center justify-content-between">
-                            <div class="d-flex align-items-center">
-                                <div class="me-3">
-                                    <span class="badge bg-primary rounded-pill push-pulse" style="width: 12px; height: 12px; padding: 0;"></span>
-                                </div>
-                                <div>
-                                    <h5 class="mb-1 fw-bold text-dark">Push #${index + 1}</h5>
-                                    <p class="mb-0 text-muted fs-6">PID: ${push.pid}</p>
-                                </div>
-                            </div>
-                            <div class="text-end">
-                                <div class="badge bg-info px-4 py-3 push-timer" 
-                                     data-seconds="${push.active_seconds}"
-                                     style="font-family: monospace; font-size: 1.1rem; font-weight: 600; letter-spacing: 1px;">
-                                    <i class="bi bi-stopwatch me-2 fs-6"></i>${push.formatted_time}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        container.innerHTML = html + `
-            <style>
-                .push-pulse {
-                    animation: pushPulse 2s ease-in-out infinite;
+    const ws = new WebSocket(`ws://${window.location.host}/ws/${type}/{{ original_name }}`);
+    wsConnections[type] = ws;
+
+    ws.onopen = () => {
+        console.log(`${type} WebSocket connected`);
+        wsReconnectAttempts = 0; // Reset attempts on successful connection
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            requestAnimationFrame(() => {
+                switch(type) {
+                    case 'input_stats':
+                        updateInputStatsDisplay(data.input_stats);
+                        break;
+                    case 'active_pushes':
+                        updateActivePushesDisplay(data.pushes);
+                        break;
+                    case 'stream_data':
+                        updateStreamDataDisplay(data);
+                        break;
                 }
-                @keyframes pushPulse {
-                    0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.4); }
-                    50% { opacity: 0.8; transform: scale(1.1); box-shadow: 0 0 0 8px rgba(13, 110, 253, 0); }
-                }
-                .active-push-card:hover {
-                    transform: translateY(-2px);
-                    box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
-                }
-            </style>
-        `;
-        
-        // Start or restart timer management
-        startPushTimers();
-    })
-    .catch(error => {
-        clearTimeout(timeoutId);
-        pushErrors++;
-        
-        const container = document.getElementById('activePushesContainer');
-        
-        // More conservative error handling
-        if (pushErrors === 1) {
-            // Don't show error immediately, just increase interval
-            pushInterval = 8000;
-        } else if (pushErrors <= 3) {
-            container.innerHTML = '<div class="text-sm text-warning text-center py-3"><i class="bi bi-wifi"></i> Checking connection...</div>';
-            pushInterval = 10000;
-        } else if (pushErrors <= 6) {
-            container.innerHTML = '<div class="text-sm text-info text-center py-3"><i class="bi bi-arrow-repeat"></i> Reconnecting...</div>';
-            pushInterval = 15000;
-        } else {
-            container.innerHTML = '<div class="text-sm text-secondary text-center py-3"><i class="bi bi-pause-circle"></i> Monitoring paused</div>';
-            pushInterval = 30000; // Much longer interval for persistent failures
+            });
+        } catch (error) {
+            console.error(`Error processing ${type} message:`, error);
         }
+    };
+
+    ws.onclose = (event) => {
+        console.log(`${type} WebSocket closed:`, event.code, event.reason);
         
-        console.warn(`Push update failed (attempt ${pushErrors}):`, error.message);
-    })
-    .finally(() => {
-        isPushUpdating = false;
-        clearTimeout(pushTimer);
-        pushTimer = setTimeout(updateActivePushes, pushInterval);
-    });
+        // Only attempt reconnect if not closed cleanly
+        if (event.code !== 1000) {
+            if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                wsReconnectAttempts++;
+                setTimeout(() => connectWebSocket(type), RECONNECT_DELAY * wsReconnectAttempts);
+        } else {
+                showConnectionError(type);
+            }
+        }
+    };
+
+    ws.onerror = (error) => {
+        console.error(`${type} WebSocket error:`, error);
+        showConnectionError(type);
+    };
 }
 
-// Real-time update function
-async function updateStreamData() {
-    if (isUpdating) return;
-    isUpdating = true;
-    
-    try {
-        const response = await fetch(`/api/stream/{{ original_name }}/details`, {
-            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-        });
-        
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        
-        consecutiveErrors = 0;
-        interval = 3000;
-        
-        // Update status badge
-        const statusBadge = document.querySelector('.stream-status-badge');
-        if (statusBadge) {
-            const isOnline = data.is_online;
-            statusBadge.className = `badge rounded-pill stream-status-badge me-2 ${isOnline ? 'bg-success' : 'bg-secondary'}`;
-            statusBadge.innerHTML = isOnline ? 
-                '<i class="bi bi-check-circle-fill"></i> Online' : 
-                '<i class="bi bi-x-circle-fill"></i> Offline';
-        }
-        
-        // Update viewer count in header
-        const viewerCount = document.querySelector('.viewer-count');
-        if (viewerCount && viewerCount.textContent !== String(data.current_viewers)) {
-            viewerCount.textContent = data.current_viewers;
-            viewerCount.style.transform = 'scale(1.2)';
-            viewerCount.style.color = '#fff';
-            setTimeout(() => {
-                viewerCount.style.transform = 'scale(1)';
-                viewerCount.style.color = '';
-            }, 300);
-        }
-        
-        // Update current viewers card
-        const currentViewersDisplay = document.querySelector('.current-viewers-display');
-        if (currentViewersDisplay && currentViewersDisplay.textContent !== String(data.current_viewers)) {
-            currentViewersDisplay.style.transform = 'scale(1.1)';
-            currentViewersDisplay.style.color = '#0d6efd';
-            currentViewersDisplay.textContent = data.current_viewers;
-            setTimeout(() => {
-                currentViewersDisplay.style.transform = 'scale(1)';
-                currentViewersDisplay.style.color = '';
-            }, 300);
-        }
-        
-        // Update max viewers card
-        const maxViewersDisplay = document.querySelector('.max-viewers-display');
-        if (maxViewersDisplay && data.max_viewers && maxViewersDisplay.textContent !== String(data.max_viewers)) {
-            maxViewersDisplay.style.transform = 'scale(1.1)';
-            maxViewersDisplay.style.color = '#198754';
-            maxViewersDisplay.textContent = data.max_viewers;
-            setTimeout(() => {
-                maxViewersDisplay.style.transform = 'scale(1)';
-                maxViewersDisplay.style.color = '';
-            }, 300);
-        }
-        
-        // Update chart
-        if (viewerChart && data.current_viewers !== undefined) {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString();
-            
-            viewerChart.data.labels.push(timeString);
-            viewerChart.data.datasets[0].data.push(data.current_viewers);
-            
-            // Keep only last 20 points
-            if (viewerChart.data.labels.length > 20) {
-                viewerChart.data.labels.shift();
-                viewerChart.data.datasets[0].data.shift();
-            }
-            viewerChart.update('none');
-        }
-        
-        // Update last update time
-        const lastUpdateTime = document.getElementById('last-update-time');
-        if (lastUpdateTime) {
-            lastUpdateTime.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-        }
-        
-    } catch (error) {
-        consecutiveErrors++;
-        interval = Math.min(3000 * consecutiveErrors, 15000);
-        console.warn('Stream data update failed:', error.message);
-        
-        // Show error state
-        const lastUpdateTime = document.getElementById('last-update-time');
-        if (lastUpdateTime && consecutiveErrors > 2) {
-            lastUpdateTime.innerHTML = `<span class="text-warning">Connection issues - retrying...</span>`;
-        }
-        
-    } finally {
-        isUpdating = false;
-        clearTimeout(updateTimer);
-        updateTimer = setTimeout(updateStreamData, interval);
+function showConnectionError(type) {
+    const container = document.getElementById(`${type}Container`);
+    if (container) {
+        container.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle"></i> Connection lost. 
+                <button class="btn btn-sm btn-outline-warning ms-2" onclick="reconnectWebSocket('${type}')">
+                    Retry
+                </button>
+            </div>
+        `;
     }
 }
+
+function reconnectWebSocket(type) {
+    wsReconnectAttempts = 0;
+    connectWebSocket(type);
+}
+
+// Optimize page visibility handling
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        // Don't close connections, just pause updates
+        Object.values(wsConnections).forEach(ws => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'pause' }));
+            }
+        });
+    } else {
+        // Resume updates
+        Object.values(wsConnections).forEach(ws => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'resume' }));
+            }
+        });
+    }
+});
+
+// Network status handlers
+window.addEventListener('online', function() {
+    wsReconnectAttempts = 0;
+    initializeWebSockets();
+});
+
+window.addEventListener('offline', function() {
+    Object.values(wsConnections).forEach(ws => {
+        if (ws) {
+            ws.close(1000, 'Network offline');
+        }
+    });
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    Object.values(wsConnections).forEach(ws => {
+        if (ws) {
+            ws.close(1000, 'Page unload');
+        }
+    });
+});
+
+// Start WebSocket connections
+initializeWebSockets();
 
 // Copy buttons functionality
 document.querySelectorAll('.copy-btn').forEach(btn => {
@@ -742,7 +624,7 @@ document.querySelector('.reset-stream-btn').addEventListener('click', async func
     button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Resetting...';
     
     try {
-        await fetch('/api/reset_stream', {
+        const response = await fetch('/api/reset_stream', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -750,12 +632,71 @@ document.querySelector('.reset-stream-btn').addEventListener('click', async func
             body: JSON.stringify({ stream_name: streamName })
         });
         
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update UI elements
+            const statusBadge = document.querySelector('.stream-status-badge');
+            if (statusBadge) {
+                statusBadge.className = 'badge rounded-pill stream-status-badge me-2 bg-secondary';
+                statusBadge.innerHTML = '<i class="bi bi-x-circle-fill"></i> Offline';
+            }
+            
+            // Update viewer counts
+            const viewerElements = [
+                document.querySelector('.viewer-count'),
+                document.querySelector('.current-viewers-display'),
+                document.querySelector('.max-viewers-display')
+            ];
+            
+            viewerElements.forEach(element => {
+                if (element) {
+                    element.textContent = '0';
+                    element.style.transform = 'scale(1.1)';
+                    element.style.color = '#dc3545';
+                    setTimeout(() => {
+                        element.style.transform = 'scale(1)';
+                        element.style.color = '';
+                    }, 300);
+                }
+            });
+            
+            // Update chart
+            if (viewerChart) {
+                const now = new Date();
+                const timeString = now.toLocaleTimeString();
+                
+                viewerChart.data.labels.push(timeString);
+                viewerChart.data.datasets[0].data.push(0);
+                
+                if (viewerChart.data.labels.length > 20) {
+                    viewerChart.data.labels.shift();
+                    viewerChart.data.datasets[0].data.shift();
+                }
+                viewerChart.update('none');
+            }
+            
+            // Show success message
         button.innerHTML = '<i class="bi bi-check-circle"></i> Done';
         setTimeout(() => {
-            window.location.reload();
-        }, 1000);
-        
+                button.innerHTML = '<i class="bi bi-arrow-repeat"></i> Reset Stream';
+                button.disabled = false;
+            }, 2000);
+            
+            // Reconnect WebSockets after a short delay
+            setTimeout(() => {
+                if (inputStatsWs) inputStatsWs.close();
+                if (activePushesWs) activePushesWs.close();
+                if (streamDataWs) streamDataWs.close();
+                connectWebSockets();
+            }, 3000);
+            
+        } else {
+            throw new Error(data.error || 'Reset failed');
+        }
     } catch (error) {
+        console.error('Reset error:', error);
+        button.innerHTML = '<i class="bi bi-exclamation-circle"></i> Failed';
         setTimeout(() => {
             button.innerHTML = '<i class="bi bi-arrow-repeat"></i> Reset Stream';
             button.disabled = false;
@@ -777,167 +718,6 @@ document.getElementById('manual-refresh-btn')?.addEventListener('click', functio
         btn.disabled = false;
     });
 });
-
-// Optimized input stats updater with better stability
-let inputErrors = 0;
-let inputInterval = 3000; // Increased base interval
-let inputTimer = null;
-let isInputUpdating = false;
-let lastInputData = null;
-
-function updateInputStats() {
-    if (isInputUpdating) return;
-    isInputUpdating = true;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // Increased timeout
-    
-    fetch(`/api/stream/{{ original_name }}/input_stats`, {
-        signal: controller.signal,
-        headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        }
-    })
-    .then(response => {
-        clearTimeout(timeoutId);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        inputErrors = 0;
-        inputInterval = 3000; // Reset to base
-        
-        const container = document.getElementById('inputStatsContainer');
-        
-        // Check if data changed
-        const dataKey = JSON.stringify(data);
-        if (dataKey === lastInputData) {
-            return; // No changes, skip DOM update
-        }
-        lastInputData = dataKey;
-        
-        if (!data.input_stats || data.input_stats.length === 0) {
-            let message = '';
-            if (inputErrors === 0) {
-                message = '<div class="text-sm text-muted text-center py-3"><i class="bi bi-search"></i> No active inputs detected</div>';
-            } else {
-                message = '<div class="text-sm text-secondary text-center py-3"><i class="bi bi-pause-circle"></i> Monitoring for inputs</div>';
-            }
-            
-            container.innerHTML = message;
-            inputInterval = 8000; // Longer interval when no inputs
-            return;
-        }
-        
-        {% if current_user.role == "admin" %}
-            let html = '';
-            data.input_stats.forEach((stats, index) => {
-                const hours = Math.floor(stats.connected_time / 3600);
-                const minutes = Math.floor((stats.connected_time % 3600) / 60);
-                const seconds = stats.connected_time % 60;
-                const connTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                
-                html += `
-                    <div class="card mb-3 border-success">
-                        <div class="card-header bg-light d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-broadcast"></i> Input #${index + 1}</span>
-                            <span class="badge bg-success">● LIVE</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <p><strong>Host:</strong> ${stats.host}</p>
-                                    <p><strong>Protocol:</strong> ${stats.protocol}</p>
-                                    <p><strong>Connected:</strong> ${connTime}</p>
-                                    <p><strong>Connection Time:</strong> ${stats.connected_time} seconds</p>
-                                </div>
-                                <div class="col-md-6">
-                                    <p><strong>Data Downloaded:</strong><br/>${stats.data_downloaded_gb.toFixed(2)} GB, ${stats.data_downloaded_mb.toFixed(2)} MB</p>
-                                    <p><strong>Current Bitrate:</strong> ${stats.current_bitrate_mbps.toFixed(2)} Mbps</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            container.innerHTML = html;
-        {% else %}
-            // Show only the first input for non-admin users
-            const stats = data.input_stats[0]; // Get only the first input
-            const hours = Math.floor(stats.connected_time / 3600);
-            const minutes = Math.floor((stats.connected_time % 3600) / 60);
-            const seconds = stats.connected_time % 60;
-            const connTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-            
-            const html = `
-                <div class="card mb-3 border-0 shadow-sm active-input" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); transition: all 0.3s ease;">
-                    <div class="card-body p-4">
-                        <div class="d-flex align-items-center justify-content-between">
-                            <div class="d-flex align-items-center">
-                                <div class="me-3">
-                                    <span class="badge bg-success rounded-pill live-pulse" style="width: 12px; height: 12px; padding: 0;"></span>
-                                </div>
-                                <div>
-                                    <h5 class="mb-1 fw-bold text-dark">Uptime</h5>
-                                    <p class="mb-0 text-muted fs-6">Input Stream</p>
-                                </div>
-                            </div>
-                            <div class="text-end">
-                                <div class="badge bg-primary px-4 py-3" style="font-family: monospace; font-size: 1.1rem; font-weight: 600; letter-spacing: 1px;">
-                                    <i class="bi bi-stopwatch me-2 fs-6"></i>${connTime}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            container.innerHTML = html + `
-                <style>
-                    .live-pulse {
-                        animation: livePulse 2s ease-in-out infinite;
-                    }
-                    @keyframes livePulse {
-                        0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 135, 84, 0.4); }
-                        50% { opacity: 0.8; transform: scale(1.1); box-shadow: 0 0 0 8px rgba(25, 135, 84, 0); }
-                    }
-                    .active-input:hover {
-                        transform: translateY(-2px);
-                        box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
-                    }
-                </style>
-            `;
-        {% endif %}
-    })
-    .catch(error => {
-        clearTimeout(timeoutId);
-        inputErrors++;
-        
-        const container = document.getElementById('inputStatsContainer');
-        
-        // More graceful error handling
-        if (inputErrors <= 2) {
-            inputInterval = 5000;
-        } else if (inputErrors <= 5) {
-            container.innerHTML = '<div class="text-sm text-info text-center py-3"><i class="bi bi-wifi"></i> Checking connection...</div>';
-            inputInterval = 10000;
-        } else {
-            container.innerHTML = '<div class="text-sm text-secondary text-center py-3"><i class="bi bi-pause-circle"></i> Monitoring paused</div>';
-            inputInterval = 20000;
-        }
-        
-        console.warn(`Input stats update failed (attempt ${inputErrors}):`, error.message);
-    })
-    .finally(() => {
-        isInputUpdating = false;
-        clearTimeout(inputTimer);
-        inputTimer = setTimeout(updateInputStats, inputInterval);
-    });
-}
-
 
 // Push configuration toggle buttons
 document.querySelectorAll('.toggle-push').forEach(btn => {
@@ -1045,71 +825,402 @@ document.querySelectorAll('.update-url-btn').forEach(btn => {
     });
 });
 
-// Page visibility handling
-document.addEventListener('visibilitychange', function() {
-    if (document.hidden) {
-        clearTimeout(updateTimer);
-        clearTimeout(inputTimer);
-        clearTimeout(pushTimer);
-        clearInterval(pushTimerInterval);
-    } else {
-        // Reset error counts when page becomes visible
-        consecutiveErrors = 0;
-        inputErrors = 0;
-        pushErrors = 0;
-        interval = 3000;
-        inputInterval = 3000;
-        pushInterval = 5000;
+// Real-time update function
+async function updateStreamData() {
+    if (isUpdating) return;
+    isUpdating = true;
+    
+    try {
+        const response = await fetch(`/api/stream/{{ original_name }}/details`, {
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
         
-        updateStreamData();
-        updateInputStats();
-        updateActivePushes();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        
+    consecutiveErrors = 0;
+    interval = 3000;
+        
+        // Update status badge
+        const statusBadge = document.querySelector('.stream-status-badge');
+        if (statusBadge) {
+            const isOnline = data.is_online;
+            statusBadge.className = `badge rounded-pill stream-status-badge me-2 ${isOnline ? 'bg-success' : 'bg-secondary'}`;
+            statusBadge.innerHTML = isOnline ? 
+                '<i class="bi bi-check-circle-fill"></i> Online' : 
+                '<i class="bi bi-x-circle-fill"></i> Offline';
+        }
+        
+        // Update viewer count in header
+        const viewerCount = document.querySelector('.viewer-count');
+        if (viewerCount && viewerCount.textContent !== String(data.current_viewers)) {
+            viewerCount.textContent = data.current_viewers;
+            viewerCount.style.transform = 'scale(1.2)';
+            viewerCount.style.color = '#fff';
+            setTimeout(() => {
+                viewerCount.style.transform = 'scale(1)';
+                viewerCount.style.color = '';
+            }, 300);
+        }
+        
+        // Update current viewers card
+        const currentViewersDisplay = document.querySelector('.current-viewers-display');
+        if (currentViewersDisplay && currentViewersDisplay.textContent !== String(data.current_viewers)) {
+            currentViewersDisplay.style.transform = 'scale(1.1)';
+            currentViewersDisplay.style.color = '#0d6efd';
+            currentViewersDisplay.textContent = data.current_viewers;
+            setTimeout(() => {
+                currentViewersDisplay.style.transform = 'scale(1)';
+                currentViewersDisplay.style.color = '';
+            }, 300);
+        }
+        
+        // Update max viewers card
+        const maxViewersDisplay = document.querySelector('.max-viewers-display');
+        if (maxViewersDisplay && data.max_viewers && maxViewersDisplay.textContent !== String(data.max_viewers)) {
+            maxViewersDisplay.style.transform = 'scale(1.1)';
+            maxViewersDisplay.style.color = '#198754';
+            maxViewersDisplay.textContent = data.max_viewers;
+            setTimeout(() => {
+                maxViewersDisplay.style.transform = 'scale(1)';
+                maxViewersDisplay.style.color = '';
+            }, 300);
+        }
+        
+        // Update chart
+        if (viewerChart && data.current_viewers !== undefined) {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+            
+            viewerChart.data.labels.push(timeString);
+            viewerChart.data.datasets[0].data.push(data.current_viewers);
+            
+            // Keep only last 20 points
+            if (viewerChart.data.labels.length > 20) {
+                viewerChart.data.labels.shift();
+                viewerChart.data.datasets[0].data.shift();
+            }
+            viewerChart.update('none');
+        }
+        
+        // Update last update time
+        const lastUpdateTime = document.getElementById('last-update-time');
+        if (lastUpdateTime) {
+            lastUpdateTime.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+        }
+        
+    } catch (error) {
+        consecutiveErrors++;
+        interval = Math.min(3000 * consecutiveErrors, 15000);
+        console.warn('Stream data update failed:', error.message);
+        
+        // Show error state
+        const lastUpdateTime = document.getElementById('last-update-time');
+        if (lastUpdateTime && consecutiveErrors > 2) {
+            lastUpdateTime.innerHTML = `<span class="text-warning">Connection issues - retrying...</span>`;
+        }
+        
+    } finally {
+        isUpdating = false;
+    clearTimeout(updateTimer);
+        updateTimer = setTimeout(updateStreamData, interval);
+    }
+}
+
+// Add skeleton loading styles
+const skeletonStyles = document.createElement('style');
+skeletonStyles.textContent = `
+    @keyframes shimmer {
+        0% { background-position: -1000px 0; }
+        100% { background-position: 1000px 0; }
+    }
+    
+    .skeleton {
+        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+        background-size: 1000px 100%;
+        animation: shimmer 2s infinite linear;
+        border-radius: 4px;
+    }
+    
+    .skeleton-text {
+        height: 1em;
+        margin-bottom: 0.5em;
+    }
+    
+    .skeleton-circle {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+    }
+    
+    .skeleton-badge {
+        width: 80px;
+        height: 24px;
+        border-radius: 12px;
+    }
+`;
+
+document.head.appendChild(skeletonStyles);
+
+// Skeleton loading templates
+const skeletonTemplates = {
+    inputStats: `
+        <div class="card mb-3 border-0 shadow-sm">
+            <div class="card-body p-4">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <div class="skeleton skeleton-circle"></div>
+                        </div>
+                        <div>
+                            <div class="skeleton skeleton-text" style="width: 100px;"></div>
+                            <div class="skeleton skeleton-text" style="width: 80px;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="skeleton skeleton-badge"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `,
+    activePushes: `
+        <div class="card mb-3 border-0 shadow-sm">
+            <div class="card-body p-3">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <div class="skeleton skeleton-circle"></div>
+                        </div>
+                        <div>
+                            <div class="skeleton skeleton-text" style="width: 80px;"></div>
+                            <div class="skeleton skeleton-text" style="width: 60px;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="skeleton skeleton-badge"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `
+};
+
+// Initialize containers with skeleton loading
+document.addEventListener('DOMContentLoaded', function() {
+    const inputStatsContainer = document.getElementById('inputStatsContainer');
+    const activePushesContainer = document.getElementById('activePushesContainer');
+    
+    if (inputStatsContainer) {
+        inputStatsContainer.innerHTML = skeletonTemplates.inputStats;
+    }
+    
+    if (activePushesContainer) {
+        activePushesContainer.innerHTML = skeletonTemplates.activePushes;
     }
 });
 
-// Network status handlers
-window.addEventListener('online', function() {
-    consecutiveErrors = 0;
-    inputErrors = 0;
-    pushErrors = 0;
-    interval = 3000;
-    inputInterval = 3000;
-    pushInterval = 5000;
-    updateStreamData();
-    updateInputStats();
-    updateActivePushes();
-});
+function updateInputStatsDisplay(stats) {
+    const container = document.getElementById('inputStatsContainer');
+    if (!container) return;
 
-window.addEventListener('offline', function() {
-    clearTimeout(updateTimer);
-    clearTimeout(inputTimer);
-    clearTimeout(pushTimer);
-    clearInterval(pushTimerInterval);
-});
+    if (!stats || !Array.isArray(stats) || stats.length === 0) {
+        container.innerHTML = `
+            <div class="card mb-3 border-success">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <h5 class="mb-1">No Input Data</h5>
+                            <p class="mb-0 text-muted">Waiting for stream input...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        return;
+    }
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', function() {
-    clearTimeout(updateTimer);
-    clearTimeout(inputTimer);
-    clearTimeout(pushTimer);
-    clearInterval(pushTimerInterval);
-});
+    const isAdmin = {{ 'true' if current_user.role == "admin" else 'false' }};
+    let html = '';
+    
+    if (isAdmin) {
+        stats.forEach((inputStat, index) => {
+            const hours = Math.floor(inputStat.connected_time / 3600);
+            const minutes = Math.floor((inputStat.connected_time % 3600) / 60);
+            const seconds = inputStat.connected_time % 60;
+            const connTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            html += `
+                <div class="card mb-3 border-success">
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-broadcast"></i> Input #${index + 1}</span>
+                        <span class="badge bg-success">● LIVE</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>Host:</strong> ${inputStat.host || 'N/A'}</p>
+                                <p><strong>Protocol:</strong> ${inputStat.protocol || 'N/A'}</p>
+                                <p><strong>Connected:</strong> ${connTime}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Data:</strong> ${(inputStat.data_downloaded_gb || 0).toFixed(2)} GB, ${(inputStat.data_downloaded_mb || 0).toFixed(2)} MB</p>
+                                <p><strong>Bitrate:</strong> ${(inputStat.current_bitrate_mbps || 0).toFixed(2)} Mbps</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+    } else {
+        const inputStat = stats[0];
+        const hours = Math.floor(inputStat.connected_time / 3600);
+        const minutes = Math.floor((inputStat.connected_time % 3600) / 60);
+        const seconds = inputStat.connected_time % 60;
+        const connTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        
+        html = `
+            <div class="card mb-3 border-0 shadow-sm active-input">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center">
+                            <div class="me-3">
+                                <span class="badge bg-success rounded-pill live-pulse"></span>
+                            </div>
+                            <div>
+                                <h5 class="mb-1 fw-bold text-dark">Uptime</h5>
+                                <p class="mb-0 text-muted fs-6">Input Stream</p>
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="badge bg-primary px-4 py-3" style="font-family: monospace; font-size: 1.1rem;">
+                                <i class="bi bi-stopwatch me-2"></i>${connTime}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
 
-// Start all updates with staggered timing to reduce server load
+function updateActivePushesDisplay(pushes) {
+    const container = document.getElementById('activePushesContainer');
+    const countBadge = document.getElementById('activePushesCount');
+    if (!container || !countBadge) return;
+
+    if (!pushes || pushes.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-3 text-muted">
+                <i class="bi bi-send-slash"></i> No active pushes
+            </div>
+        `;
+        countBadge.textContent = '0';
+        return;
+    }
+
+    countBadge.textContent = pushes.length;
+    let html = '';
+    
+    pushes.forEach((push, index) => {
+        html += `
+            <div class="card mb-3 border-primary active-push-card">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center">
+                            <div class="me-3">
+                                <span class="badge bg-primary rounded-pill push-pulse"></span>
+                            </div>
+                            <div>
+                                <h5 class="mb-1 fw-bold text-dark">Push #${index + 1}</h5>
+                                <p class="mb-0 text-muted fs-6">PID: ${push.pid}</p>
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="badge bg-info px-4 py-3" style="font-family: monospace; font-size: 1.1rem;">
+                                <i class="bi bi-stopwatch me-2"></i>${push.formatted_time}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function updateStreamDataDisplay(data) {
+    // Update status badge
+    const statusBadge = document.querySelector('.stream-status-badge');
+    if (statusBadge) {
+        const isOnline = data.is_online;
+        statusBadge.className = `badge rounded-pill stream-status-badge me-2 ${isOnline ? 'bg-success' : 'bg-secondary'}`;
+        statusBadge.innerHTML = isOnline ? 
+            '<i class="bi bi-check-circle-fill"></i> Online' : 
+            '<i class="bi bi-x-circle-fill"></i> Offline';
+    }
+    
+    // Update viewer counts
+    const viewerElements = {
+        header: document.querySelector('.viewer-count'),
+        current: document.querySelector('.current-viewers-display'),
+        max: document.querySelector('.max-viewers-display')
+    };
+
+    Object.entries(viewerElements).forEach(([key, element]) => {
+        if (element) {
+            const value = key === 'max' ? data.max_viewers : data.current_viewers;
+            if (element.textContent !== String(value)) {
+                element.textContent = value;
+                element.style.transform = 'scale(1.1)';
+                element.style.color = key === 'max' ? '#198754' : '#0d6efd';
 setTimeout(() => {
-    updateStreamData();
-    console.log('Stream data updates started');
-}, 100);
+                    element.style.transform = 'scale(1)';
+                    element.style.color = '';
+                }, 300);
+            }
+        }
+    });
+    
+    // Update chart
+    if (viewerChart && data.current_viewers !== undefined) {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString();
+        
+        viewerChart.data.labels.push(timeString);
+        viewerChart.data.datasets[0].data.push(data.current_viewers);
+        
+        if (viewerChart.data.labels.length > 20) {
+            viewerChart.data.labels.shift();
+            viewerChart.data.datasets[0].data.shift();
+        }
+        viewerChart.update('none');
+    }
+}
 
-setTimeout(() => {
-    updateInputStats();
-    console.log('Input stats updates started');
-}, 1000);
-
-setTimeout(() => {
-    updateActivePushes();
-    console.log('Active push updates started');
-}, 2000);
+// Add styles for animations
+const style = document.createElement('style');
+style.textContent = `
+    .live-pulse, .push-pulse {
+        width: 12px;
+        height: 12px;
+        padding: 0;
+        animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 135, 84, 0.4); }
+        50% { opacity: 0.8; transform: scale(1.1); box-shadow: 0 0 0 8px rgba(25, 135, 84, 0); }
+    }
+    .active-input:hover, .active-push-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
+        transition: all 0.3s ease;
+    }
+`;
+document.head.appendChild(style);
 </script>
 </body>
 </html>

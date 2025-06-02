@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, Request, HTTPException, status, Depends
+from fastapi import FastAPI, Form, Request, HTTPException, status, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import asyncio
 import json
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from database.auth.oauth2 import get_current_user, get_current_user_optional
 from database.auth.token import ALGORITHM, SECRET_KEY
 from database.models.models import AppSettings, User, UserPushLimit
@@ -64,6 +64,35 @@ Base.metadata.create_all(bind=engine)
 
 # Load environment variables
 load_dotenv()
+
+# Add WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, Set[WebSocket]] = {
+            "input_stats": set(),
+            "active_pushes": set(),
+            "stream_data": set()
+        }
+
+    async def connect(self, websocket: WebSocket, client_type: str):
+        await websocket.accept()
+        self.active_connections[client_type].add(websocket)
+
+    def disconnect(self, websocket: WebSocket, client_type: str):
+        self.active_connections[client_type].remove(websocket)
+
+    async def broadcast(self, message: dict, client_type: str):
+        for connection in self.active_connections[client_type]:
+            try:
+                await connection.send_json(message)
+            except WebSocketDisconnect:
+                self.disconnect(connection, client_type)
+            except Exception as e:
+                print(f"Error broadcasting to {client_type}: {e}")
+                self.disconnect(connection, client_type)
+
+# Initialize connection manager
+manager = ConnectionManager()
 
 class StreamMonitor:
     def __init__(self, db: Session):
@@ -292,6 +321,11 @@ class StreamMonitor:
     async def get_stream_input_stats(self, stream_name: str) -> List[Dict]:
         """Get input statistics for a specific stream"""
         try:
+            # First check if stream exists and is online
+            stream_info = self.stream_data.get(stream_name, {})
+            if not stream_info or not stream_info.get("is_online", False):
+                return self._get_default_input_stats()
+            
             # URL encode the stream name if it contains special characters like '+'
             encoded_stream = requests.utils.quote(stream_name)
             
@@ -312,15 +346,29 @@ class StreamMonitor:
             
             if resp.status_code != 200:
                 print(f"Failed to get input stats: HTTP {resp.status_code}")
-                return []
-                
-            data = resp.json()
+                return self._get_default_input_stats()
+            
+            try:
+                data = resp.json()
+            except json.JSONDecodeError:
+                print("Invalid JSON response from API")
+                return self._get_default_input_stats()
+            
+            # Check if we have valid data
+            if not data or 'clients' not in data or not data['clients']:
+                return self._get_default_input_stats()
             
             # Process the input stats
             input_stats = []
             for client in data.get("clients", []):
+                if not isinstance(client, dict) or 'fields' not in client or 'data' not in client:
+                    continue
+                    
                 fields = client.get("fields", [])
                 for row in client.get("data", []):
+                    if not isinstance(row, list) or len(row) != len(fields):
+                        continue
+                        
                     # Create stats dictionary by zipping fields with row values
                     stats = dict(zip(fields, row))
                     
@@ -338,26 +386,18 @@ class StreamMonitor:
                         "current_bitrate_mbps": round(down_bps / (1024 * 1024), 2),
                         "raw_stats": stats  # Keep raw data for debugging
                     })
-                    
-            return input_stats if input_stats else [{
-                "host": "N/A",
-                "protocol": "N/A",
-                "connected_time": 0,
-                "data_downloaded_mb": 0,
-                "data_downloaded_gb": 0,
-                "current_bitrate": 0,
-                "current_bitrate_mbps": 0,
-                "raw_stats": {}
-            }]
+            
+            return input_stats if input_stats else self._get_default_input_stats()
             
         except requests.exceptions.RequestException as e:
             print(f"Network error getting input stats: {e}")
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse response JSON: {e}")
         except Exception as e:
             print(f"Error getting input stats: {e}")
         
-        # Return default values if anything fails
+        return self._get_default_input_stats()
+        
+    def _get_default_input_stats(self) -> List[Dict]:
+        """Return default input stats when no data is available"""
         return [{
             "host": "N/A",
             "protocol": "N/A",
@@ -1167,114 +1207,103 @@ async def check_stream_recovery(stream_name: str, attempts=5, delay=3):
 @app.post("/api/toggle_push")
 async def toggle_push(
     request: Request,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user)
 ):
+    """Toggle push configuration active/inactive state"""
     try:
+        # Get JSON data from request
         data = await request.json()
         push_id = data.get("push_id")
-        new_state = data.get("new_state")
+        new_state = data.get("new_state") == "active"  # Convert string to boolean
         
         # Validate input
-        if not push_id or not new_state:
-            return JSONResponse({"success": False, "error": "Missing push_id or new_state"}, status_code=400)
-        
-        if new_state not in ("active", "inactive"):
-            return JSONResponse({"success": False, "error": "Invalid state - must be 'active' or 'inactive'"}, status_code=400)
-
-        # Verify push configuration exists
+        if not push_id or new_state is None:
+            raise HTTPException(status_code=400, detail="Invalid input parameters")
+            
+        # Get push configuration
         push_config = monitor.push_configs.get(push_id)
         if not push_config:
-            return JSONResponse({"success": False, "error": "Push configuration not found"}, status_code=404)
+            raise HTTPException(status_code=404, detail="Push configuration not found")
+            
+        # Get stream name from config
+        stream_name = push_config.get('stream', '')
+        if not stream_name:
+            raise HTTPException(status_code=400, detail="Invalid push configuration")
+            
+        # Clean stream name by removing deactivation prefix
+        cleaned_stream_name = stream_name.replace('💤deactivated💤_', '')
         
-        # Get user's push limit
-        user_limit = db.query(UserPushLimit).filter(UserPushLimit.user_id == current_user.id).first()
-        if not user_limit:
-            user_limit = UserPushLimit(user_id=current_user.id)
-            db.add(user_limit)
-        
-        current_stream_name = push_config['stream']
-        original_stream_name = current_stream_name.replace('💤deactivated💤_', '')
-        
-        if new_state == "inactive":
-            # Try to get active pushes, but proceed even if we can't
+        # Check if stream exists
+        if cleaned_stream_name not in monitor.stream_data:
+            raise HTTPException(status_code=404, detail="Stream not found")
+            
+        # Handle deactivation
+        if not new_state:
+            # Try to stop any active pushes for this stream
             try:
                 resp = monitor.session.get(
                     monitor.base_url,
                     params={"command": json.dumps({"push_list": True})}
                 )
-                
                 if resp.status_code == 200:
                     active_pushes = resp.json().get("push_list", [])
                     pids_to_stop = []
                     
                     for push in active_pushes:
-                        if len(push) >= 2 and push[1] == original_stream_name:
+                        if len(push) >= 2 and push[1] == cleaned_stream_name:
                             pids_to_stop.append(push[0])
                     
-                    # Stop any active pushes we found
                     if pids_to_stop:
                         stop_cmd = {"push_stop": pids_to_stop[0]} if len(pids_to_stop) == 1 else {"push_stop": pids_to_stop}
-                        stop_resp = monitor.session.get(
+                        monitor.session.get(
                             monitor.base_url,
                             params={"command": json.dumps(stop_cmd)}
                         )
-                        # Even if stopping fails, we'll proceed with deactivation
             except Exception as e:
-                # Log but continue with deactivation
-                print(f"Warning: Error checking active pushes: {str(e)}")
+                print(f"Error stopping push: {str(e)}")
+                
+            # Update push config with deactivation prefix
+            new_stream_name = f"💤deactivated💤_{cleaned_stream_name}"
+            push_config['stream'] = new_stream_name
             
-            # Update the push config to be deactivated
-            new_stream_name = f"💤deactivated💤_{original_stream_name}"
-            if not current_stream_name.startswith('💤deactivated💤_'):
-                user_limit.current_pushes = max(0, user_limit.current_pushes - 1)
+        # Handle activation
         else:
-            # Activating - check push limits for non-admins
-            if (user_limit.current_pushes >= user_limit.max_concurrent_pushes and 
-                current_user.role != "admin"):
-                return JSONResponse({
-                    "success": False,
-                    "error": f"Activating would exceed your push limit ({user_limit.max_concurrent_pushes})"
-                }, status_code=400)
-            
-            new_stream_name = original_stream_name
-            if current_stream_name.startswith('💤deactivated💤_'):
-                user_limit.current_pushes += 1
-        
-        # Update the push configuration
+            # Remove deactivation prefix if present
+            if stream_name.startswith('💤deactivated💤_'):
+                push_config['stream'] = cleaned_stream_name
+                
+        # Update push configuration
         update_cmd = {
             "push_auto_add": {
                 push_id: {
                     **push_config,
-                    "stream": new_stream_name
+                    "x-LSP-notes": push_config.get("x-LSP-notes", monitor._get_push_notes())
                 }
             }
         }
         
-        # Send the update command to MistServer
         resp = monitor.session.get(
             monitor.base_url,
             params={"command": json.dumps(update_cmd)}
         )
+        
         if resp.status_code != 200:
-            return JSONResponse({"success": False, "error": "Failed to update push configuration"}, status_code=400)
-        
-        # Update our local cache and commit database changes
-        monitor.push_configs[push_id]['stream'] = new_stream_name
-        db.commit()
-        
-        # Refresh push configurations
-        await monitor.get_push_configurations()
+            raise HTTPException(status_code=500, detail="Failed to update push configuration")
+            
+        # Update our local cache
+        monitor.push_configs[push_id] = push_config
         
         return JSONResponse({
             "success": True,
-            "deactivated": new_state == "inactive",
-            "stream_name": new_stream_name
+            "deactivated": not new_state,
+            "stream_name": push_config['stream']
         })
         
+    except HTTPException:
+        raise
     except Exception as e:
-        db.rollback()
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        print(f"Error toggling push: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
        
 @app.get("/api/streams", response_class=JSONResponse)
 async def get_streams_api(current_user: User = Depends(get_current_user)):
@@ -1342,6 +1371,84 @@ async def get_pushes_api():
         "sorted_list": push_list,  # Optional: includes the cleaned names and status
         "timestamp": datetime.now().isoformat()
     }
+
+# Add WebSocket endpoints
+@app.websocket("/ws/input_stats/{stream_name}")
+async def websocket_input_stats(websocket: WebSocket, stream_name: str):
+    await manager.connect(websocket, "input_stats")
+    try:
+        while True:
+            # Get input stats
+            stats = await monitor.get_stream_input_stats(stream_name)
+            await websocket.send_json({"input_stats": stats})
+            await asyncio.sleep(1)  # Update every second
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, "input_stats")
+    except Exception as e:
+        print(f"Error in input stats websocket: {e}")
+        manager.disconnect(websocket, "input_stats")
+
+@app.websocket("/ws/active_pushes/{stream_name}")
+async def websocket_active_pushes(websocket: WebSocket, stream_name: str):
+    await manager.connect(websocket, "active_pushes")
+    try:
+        while True:
+            # Get active pushes
+            resp = monitor.session.get(
+                monitor.base_url, 
+                params={"command": json.dumps({"push_list": True})},
+                timeout=5
+            )
+            active_pushes = resp.json().get("push_list", []) or []
+            
+            # Filter and format pushes for this stream
+            result = []
+            for push in active_pushes:
+                if not isinstance(push, (list, dict)) or len(push) < 6:
+                    continue
+                    
+                if push[1] == stream_name:
+                    stats = push[5] if len(push) > 5 else {}
+                    active_seconds = stats.get("active_seconds", 0)
+                    
+                    hours, remainder = divmod(active_seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    
+                    result.append({
+                        "pid": push[0],
+                        "active_seconds": active_seconds,
+                        "formatted_time": formatted_time
+                    })
+            
+            await websocket.send_json({"pushes": result})
+            await asyncio.sleep(1)  # Update every second
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, "active_pushes")
+    except Exception as e:
+        print(f"Error in active pushes websocket: {e}")
+        manager.disconnect(websocket, "active_pushes")
+
+@app.websocket("/ws/stream_data/{stream_name}")
+async def websocket_stream_data(websocket: WebSocket, stream_name: str):
+    await manager.connect(websocket, "stream_data")
+    try:
+        while True:
+            # Get stream data
+            stream = monitor.stream_data.get(stream_name)
+            if stream:
+                await websocket.send_json({
+                    "current_viewers": stream.get("current_viewers", 0),
+                    "max_viewers": stream.get("max_viewers", 0),
+                    "is_online": stream.get("is_online", False),
+                    "last_updated": stream.get("last_updated", "")
+                })
+            await asyncio.sleep(1)  # Update every second
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, "stream_data")
+    except Exception as e:
+        print(f"Error in stream data websocket: {e}")
+        manager.disconnect(websocket, "stream_data")
 
 if __name__ == "__main__":
     import uvicorn
